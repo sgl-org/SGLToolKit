@@ -17,6 +17,19 @@
         </div>
       </div>
 
+      <!-- 图片预览框 -->
+      <div class="form-section">
+        <label class="form-label">图片预览</label>
+        <div class="image-preview-container">
+          <div v-if="imagePreviewUrl" class="preview-wrapper">
+            <img :src="imagePreviewUrl" class="preview-image" alt="预览图片">
+          </div>
+          <div v-else class="preview-placeholder">
+            <span>请选择图片文件</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 转换按钮 -->
       <div class="form-actions">
         <button 
@@ -60,9 +73,11 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 
 // 响应式数据
 const imageFilePath = ref('');
+const imagePreviewUrl = ref('');
 const isConverting = ref(false);
 const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
@@ -89,6 +104,25 @@ async function selectImageFile() {
     if (selected) {
       imageFilePath.value = selected;
       addInfoMessage(`已选择图片文件: ${selected}`, 'info');
+      
+      // 生成预览URL
+      try {
+        // 使用后端的read_file_as_base64函数来读取文件
+        const base64Data = await invoke('read_file_as_base64', { path: selected });
+        
+        // 将base64数据转换为Blob
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'image/*' });
+        const url = URL.createObjectURL(blob);
+        imagePreviewUrl.value = url;
+      } catch (previewErr) {
+        console.error('生成预览失败：', previewErr);
+        addInfoMessage(`生成预览失败: ${previewErr.message || JSON.stringify(previewErr)}`, 'error');
+      }
     }
   } catch (err) {
     console.error('选择图片文件失败：', err);
@@ -220,6 +254,40 @@ h2 {
 .file-select-btn:hover {
   background: #e8e8e8;
   border-color: #ccc;
+}
+
+/* 图片预览样式 */
+.image-preview-container {
+  width: 100%;
+  height: 400px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f5f5f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.preview-placeholder {
+  color: #999;
+  font-size: 14px;
+  text-align: center;
 }
 
 .form-actions {
@@ -394,6 +462,20 @@ html.dark .file-select-btn {
 
 html.dark .file-select-btn:hover {
   background: #5588ee;
+}
+
+/* 图片预览深色主题 */
+html.dark .image-preview-container {
+  border-color: #3a3f55;
+  background: #252a3a;
+}
+
+html.dark .preview-wrapper {
+  background: #1a1d2b;
+}
+
+html.dark .preview-placeholder {
+  color: #666;
 }
 
 html.dark .info-bar {
