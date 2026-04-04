@@ -193,7 +193,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { resolve, join } from '@tauri-apps/api/path';
 
 const fontFileName = ref('');
-const fontFilePath = ref('');
+const fontFilePath = ref(localStorage.getItem('lastFontFilePath') || '');
 const fontName = ref('sgl_font');
 const fontSize = ref(24);
 const bpp = ref(4);
@@ -203,7 +203,7 @@ const charRangeEnd = ref('0x7F');
 const charRanges = ref([{ start: 0x20, end: 0x7F }]);
 const customChars = ref('');
 const outputDirName = ref('');
-const outputDirPath = ref('');
+const outputDirPath = ref(localStorage.getItem('lastOutputDirPath') || '');
 const align = ref(1);
 const compress = ref(false);
 const isConverting = ref(false);
@@ -241,6 +241,7 @@ async function selectFontFile() {
     if (selected) {
       fontFilePath.value = selected;
       fontFileName.value = selected.split(/[/\\]/).pop() || '已选择字体文件';
+      localStorage.setItem('lastFontFilePath', selected);
     }
   } catch (err) {
     console.error('选择字体文件失败：', err);
@@ -262,6 +263,7 @@ async function selectOutputDir() {
     if (selected) {
       outputDirPath.value = selected;
       outputDirName.value = selected.split(/[/\\]/).pop() || '已选择文件夹';
+      localStorage.setItem('lastOutputDirPath', selected);
     }
   } catch (err) {
     console.error('选择文件夹失败：', err);
