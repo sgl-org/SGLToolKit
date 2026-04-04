@@ -250,7 +250,7 @@ const modalType = ref('info');
 const showCopyTip = ref(false);
 
 const canConvert = computed(() => {
-  return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '');
+  return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
 });
 
 const hasSuccessMessage = computed(() => {
@@ -512,19 +512,33 @@ async function convertFont() {
     const exePath = '../src/sgl_font_conv/sgl_font_conv.exe';
 
     const args = [
-      '--font', fontFilePath.value,
       '--size', fontSize.value.toString(),
       '--bpp', bpp.value.toString(),
       '--format', 'sgl',
       '--align', align.value.toString()
     ];
 
-    for (const range of charRanges.value) {
-      args.push('-r', `0x${range.start.toString(16)}-0x${range.end.toString(16)}`);
+    // 检查是否需要添加字体文件
+    const hasMainFontContent = charRanges.value.length > 0 || customChars.value.trim() !== '';
+    if (hasMainFontContent) {
+      args.push('--font', fontFilePath.value);
+      // 添加主字体的范围
+      for (const range of charRanges.value) {
+        args.push('-r', `0x${range.start.toString(16)}-0x${range.end.toString(16)}`);
+      }
+      // 添加主字体的自定义字符
+      if (customChars.value) {
+        args.push('--symbols', customChars.value);
+      }
     }
 
-    if (customChars.value) {
-      args.push('--symbols', customChars.value);
+    // 检查是否需要添加图标字体文件
+    if (iconFontFilePath.value && selectedIcons.value.length > 0) {
+      args.push('--font', iconFontFilePath.value);
+      // 添加图标字体的范围
+      for (const icon of selectedIcons.value) {
+        args.push('-r', `0x${icon.code.toString(16)}`);
+      }
     }
 
     if (compress.value) {
