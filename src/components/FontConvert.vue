@@ -191,7 +191,7 @@
     <div v-if="showCopyTip" class="copy-tip">复制成功！</div>
 
     <!-- 信息输出栏 -->
-    <div class="info-bar" :class="{ 'info-success': hasSuccessMessage, 'info-error': hasErrorMessage }">
+    <div class="info-bar">
       <h4>LOG信息</h4>
       <div class="info-messages" ref="infoMessagesRef">
         <div 
@@ -260,13 +260,7 @@ const canConvert = computed(() => {
   return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
 });
 
-const hasSuccessMessage = computed(() => {
-  return infoMessages.value.some(msg => msg.type === 'info');
-});
 
-const hasErrorMessage = computed(() => {
-  return infoMessages.value.some(msg => msg.type === 'error');
-});
 
 async function selectFontFile() {
   try {
@@ -1057,21 +1051,13 @@ h2 {
 .info-bar {
   margin-top: 24px;
   padding: 12px;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  background: #fafafa;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
   transition: all 0.3s ease;
 }
 
-.info-bar.info-success {
-  border-color: #52c41a;
-  background: #f6ffed;
-}
 
-.info-bar.info-error {
-  border-color: #ff4d4f;
-  background: #fff1f0;
-}
 
 .info-bar h4 {
   margin: 0 0 12px 0;
@@ -1115,7 +1101,7 @@ h2 {
 .info-message.error {
   background: #fff1f0;
   border: 1px solid #ffccc7;
-  color: #ff4d4f;
+  color: #ff7875;
 }
 
 .msg-time {
@@ -1133,8 +1119,8 @@ h2 {
 
 .copy-msg-btn {
   background: transparent;
-  border: 1px solid #ff4d4f;
-  color: #ff4d4f;
+  border: 1px solid #ff7875;
+  color: #ff7875;
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
@@ -1145,7 +1131,7 @@ h2 {
 }
 
 .copy-msg-btn:hover {
-  background: #ff4d4f;
+  background: #ff7875;
   color: white;
 }
 
@@ -1298,7 +1284,7 @@ html.dark .file-select-btn:hover {
 }
 
 html.dark .info-bar {
-  background: #1a1d2b;
+  background: #252a3a;
   border-color: #3a3f55;
 }
 
@@ -1306,15 +1292,7 @@ html.dark .info-bar h4 {
   color: #e0e0e0;
 }
 
-html.dark .info-bar.info-success {
-  border-color: #52c41a;
-  background: #1a2e1a;
-}
 
-html.dark .info-bar.info-error {
-  border-color: #ff4d4f;
-  background: #2e1a1a;
-}
 
 html.dark .info-message {
   background: #252a3a;
@@ -1329,8 +1307,8 @@ html.dark .info-message.info {
 
 html.dark .info-message.error {
   background: #2e1a1a;
-  border-color: #ff4d4f;
-  color: #e0e0e0;
+  border-color: #ff7875;
+  color: #ff7875;
 }
 
 html.dark .msg-time {
