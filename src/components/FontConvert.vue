@@ -63,43 +63,56 @@
       </div>
 
       <div class="form-section">
-        <label class="form-label">字符范围</label>
-        <div class="range-inputs">
-          <input 
-            v-model="charRangeStart" 
-            type="text" 
-            placeholder="0x20"
-            class="form-input small"
-          />
-          <span>-</span>
-          <input 
-            v-model="charRangeEnd" 
-            type="text" 
-            placeholder="0x7F"
-            class="form-input small"
-          />
-          <button class="add-range-btn" @click="addCharRange">添加</button>
-        </div>
-        <div class="range-tags">
-          <span 
-            v-for="(range, index) in charRanges" 
-            :key="index"
-            class="range-tag"
-          >
-            {{ formatRange(range) }}
-            <span class="remove-tag" @click="removeCharRange(index)">×</span>
-          </span>
+        <div class="range-fontname-row">
+          <div class="range-section">
+            <label class="form-label">字符范围</label>
+            <div class="range-inputs">
+              <input 
+                v-model="charRangeStart" 
+                type="text" 
+                placeholder="0x20"
+                class="form-input small"
+              />
+              <span>-</span>
+              <input 
+                v-model="charRangeEnd" 
+                type="text" 
+                placeholder="0x7F"
+                class="form-input small"
+              />
+              <button class="add-range-btn" @click="addCharRange">添加</button>
+            </div>
+            <div class="range-tags">
+              <span 
+                v-for="(range, index) in charRanges" 
+                :key="index"
+                class="range-tag"
+              >
+                {{ formatRange(range) }}
+                <span class="remove-tag" @click="removeCharRange(index)">×</span>
+              </span>
+            </div>
+          </div>
+          <div class="fontname-section">
+            <label class="form-label">字体名称</label>
+            <input 
+              v-model="fontName" 
+              type="text" 
+              placeholder="输入字体名称"
+              class="form-input fontname-input"
+            />
+          </div>
         </div>
       </div>
 
       <div class="form-section">
         <label class="form-label">自定义字符</label>
-        <input 
+        <textarea 
           v-model="customChars" 
-          type="text" 
+          rows="3"
           placeholder="输入要包含的字符"
-          class="form-input"
-        />
+          class="form-input custom-chars-textarea"
+        ></textarea>
       </div>
 
       <div class="form-section">
@@ -155,6 +168,7 @@ import { resolve, join } from '@tauri-apps/api/path';
 
 const fontFileName = ref('');
 const fontFilePath = ref('');
+const fontName = ref('');
 const fontSize = ref(24);
 const bpp = ref(4);
 const charRangeStart = ref('0x20');
@@ -297,18 +311,18 @@ async function convertFont() {
     }
 
     // 设置输出路径（必需）
-    let outputPath;
+    let outputFullPath;
     if (outputDirPath.value) {
-      const outputFileName = `font_${fontSize.value}px_bpp${bpp.value}.c`;
-      outputPath = await join(outputDirPath.value, outputFileName);
+      const outputFileName = fontName.value ? `${fontName.value}.c` : `font_${fontSize.value}px_bpp${bpp.value}.c`;
+      outputFullPath = await join(outputDirPath.value, outputFileName);
     } else {
       // 使用默认输出路径
       const { appDir } = await import('@tauri-apps/api/path');
       const appDirPath = await appDir();
-      const outputFileName = `font_${fontSize.value}px_bpp${bpp.value}.c`;
-      outputPath = await join(appDirPath, outputFileName);
+      const outputFileName = fontName.value ? `${fontName.value}.c` : `font_${fontSize.value}px_bpp${bpp.value}.c`;
+      outputFullPath = await join(appDirPath, outputFileName);
     }
-    args.push('-o', outputPath);
+    args.push('--output', outputFullPath);
 
     // 构建完整的命令字符串用于打印
     const commandStr = `${exePath} ${args.join(' ')}`;
@@ -500,6 +514,32 @@ h2 {
 .setting-checkbox-box span {
   font-size: 14px;
   color: #333;
+}
+
+.custom-chars-textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.range-fontname-row {
+  display: flex;
+  gap: 16px;
+}
+
+.range-section {
+  flex: 2;
+}
+
+.fontname-section {
+  flex: 1;
+  min-width: 150px;
+}
+
+.fontname-input {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .range-inputs {
