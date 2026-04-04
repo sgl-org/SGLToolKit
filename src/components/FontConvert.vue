@@ -114,6 +114,37 @@
       </div>
 
       <div class="form-section">
+        <label class="form-label">图标字体文件</label>
+        <div class="file-input-wrapper">
+          <input 
+            v-model="iconFontFilePath" 
+            type="text" 
+            placeholder="选择图标字体文件路径"
+            class="form-input path-input"
+            readonly
+          />
+          <button class="file-select-btn" @click="selectIconFontFile">浏览</button>
+        </div>
+      </div>
+
+      <div class="form-section" v-if="iconFontFilePath">
+        <label class="form-label">图标预览</label>
+        <div class="icon-preview-container">
+          <div 
+            v-for="(icon, index) in iconList" 
+            :key="index"
+            class="icon-item"
+            @click="toggleIconSelection(icon)"
+            :class="{ selected: selectedIcons.includes(icon) }"
+          >
+            <div class="icon-char">{{ icon.char }}</div>
+            <div class="icon-code">U+{{ icon.code.toString(16).toUpperCase().padStart(4, '0') }}</div>
+          </div>
+          <div v-if="iconList.length === 0" class="no-icons">暂无图标</div>
+        </div>
+      </div>
+
+      <div class="form-section">
         <label class="form-label">输出文件夹</label>
         <div class="file-input-wrapper">
           <input 
@@ -202,6 +233,9 @@ const charRanges = ref([{ start: 0x20, end: 0x7F }]);
 const customChars = ref('');
 const outputDirName = ref('');
 const outputDirPath = ref(localStorage.getItem('lastOutputDirPath') || '');
+const iconFontFilePath = ref('');
+const iconList = ref([]);
+const selectedIcons = ref([]);
 const align = ref(1);
 const compress = ref(false);
 const isConverting = ref(false);
@@ -269,6 +303,87 @@ async function selectOutputDir() {
     modalTitle.value = '选择失败';
     modalContent.value = `选择文件夹失败: ${JSON.stringify(err)}`;
     modalType.value = 'error';
+  }
+}
+
+async function selectIconFontFile() {
+  try {
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      title: '选择图标字体文件',
+      filters: [
+        { name: '字体文件', extensions: ['ttf', 'otf', 'woff', 'woff2'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    });
+    
+    if (selected) {
+      iconFontFilePath.value = selected;
+      await parseIconFont(selected);
+    }
+  } catch (err) {
+    console.error('选择图标字体文件失败：', err);
+    showModal.value = true;
+    modalTitle.value = '选择失败';
+    modalContent.value = `选择图标字体文件失败: ${JSON.stringify(err)}`;
+    modalType.value = 'error';
+  }
+}
+
+async function parseIconFont(filePath) {
+  try {
+    console.log('开始解析图标字体:', filePath);
+    
+    const opentype = await import('opentype.js');
+    const base64Data = await invoke('read_file_as_base64', { path: filePath });
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const arrayBuffer = bytes.buffer;
+    console.log('ArrayBuffer 创建成功，大小:', arrayBuffer.byteLength);
+    
+    const font = opentype.parse(arrayBuffer);
+    console.log('字体解析成功，字体名称:', font.names.fontFamily);
+    
+    const icons = [];
+    const glyphNames = Object.keys(font.glyphs.glyphs);
+    console.log('字形数量:', glyphNames.length);
+    
+    glyphNames.forEach(name => {
+      const glyph = font.glyphs.glyphs[name];
+      if (glyph && glyph.unicode !== undefined && glyph.unicode !== null) {
+        const unicode = glyph.unicode;
+        if (unicode >= 0xE000 && unicode <= 0xF8FF) {
+          icons.push({
+            code: unicode,
+            char: String.fromCharCode(unicode),
+            name: name
+          });
+        }
+      }
+    });
+    
+    icons.sort((a, b) => a.code - b.code);
+    console.log('找到图标数量:', icons.length);
+    iconList.value = icons;
+    selectedIcons.value = [];
+  } catch (err) {
+    console.error('解析图标字体失败：', err);
+    console.error('错误详情:', err.message, err.stack);
+    iconList.value = [];
+    selectedIcons.value = [];
+  }
+}
+
+function toggleIconSelection(icon) {
+  const index = selectedIcons.value.findIndex(i => i.code === icon.code);
+  if (index > -1) {
+    selectedIcons.value.splice(index, 1);
+  } else {
+    selectedIcons.value.push(icon);
   }
 }
 
@@ -922,5 +1037,64 @@ h2 {
 .copy-msg-btn:hover {
   background: #ff4d4f;
   color: white;
+}
+
+/* 图标预览样式 */
+.icon-preview-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.icon-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.icon-item:hover {
+  border-color: #5a86ff;
+  background: #f0f5ff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.icon-item.selected {
+  border-color: #5a86ff;
+  background: #e6f7ff;
+  box-shadow: 0 0 0 2px #5a86ff;
+}
+
+.icon-char {
+  font-size: 28px;
+  margin-bottom: 4px;
+  font-family: 'Segoe UI Symbol', 'Arial Unicode MS', sans-serif;
+}
+
+.icon-code {
+  font-size: 10px;
+  color: #999;
+  font-family: monospace;
+}
+
+.no-icons {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #999;
+  padding: 40px 0;
+  font-size: 14px;
 }
 </style>
