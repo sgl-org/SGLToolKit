@@ -1178,3 +1178,142 @@ h2 {
   font-size: 14px;
 }
 </style>
+
+<style>
+/* 深色主题样式 */
+html.dark .page-container {
+  background: transparent;
+}
+
+html.dark .converter-form {
+  background: #1a1d2b;
+  border-color: #3a3f55;
+}
+
+html.dark .form-section {
+  color: #e0e0e0;
+}
+
+html.dark .form-label {
+  color: #e0e0e0;
+}
+
+html.dark .setting-label {
+  color: #e0e0e0;
+}
+
+html.dark .form-input,
+html.dark .form-select {
+  background: #252a3a;
+  border-color: #3a3f55;
+  color: #e0e0e0;
+}
+
+html.dark .form-input:focus,
+html.dark .form-select:focus {
+  border-color: #6699ff;
+  background: #2f354a;
+}
+
+html.dark .file-input-wrapper {
+  background: #252a3a;
+}
+
+html.dark .file-select-btn {
+  background: #6699ff;
+  color: white;
+}
+
+html.dark .file-select-btn:hover {
+  background: #5588ee;
+}
+
+html.dark .info-bar {
+  background: #1a1d2b;
+  border-color: #3a3f55;
+}
+
+html.dark .info-bar h4 {
+  color: #e0e0e0;
+}
+
+html.dark .info-bar.info-success {
+  border-color: #52c41a;
+  background: #1a2e1a;
+}
+
+html.dark .info-bar.info-error {
+  border-color: #ff4d4f;
+  background: #2e1a1a;
+}
+
+html.dark .info-message {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .info-message.info {
+  background: #1a2e3a;
+  border-color: #1890ff;
+  color: #e0e0e0;
+}
+
+html.dark .info-message.error {
+  background: #2e1a1a;
+  border-color: #ff4d4f;
+  color: #e0e0e0;
+}
+
+html.dark .msg-time {
+  color: #999;
+}
+
+html.dark .msg-content {
+  color: #e0e0e0;
+}
+
+html.dark .icon-preview-container {
+  background: #1a1d2b;
+  border-color: #3a3f55;
+}
+
+html.dark .icon-item {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .icon-item:hover {
+  background: #2f354a;
+  border-color: #6699ff;
+}
+
+html.dark .icon-item.selected {
+  background: #1a2e3a;
+  border-color: #6699ff;
+}
+
+html.dark .icon-code {
+  color: #999;
+}
+
+html.dark .no-icons {
+  color: #666;
+}
+
+html.dark .empty-log {
+  color: #666;
+}
+
+html.dark .setting-checkbox-box {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .setting-checkbox-box span {
+  color: #e0e0e0;
+}
+
+html.dark .setting-checkbox-box input[type="checkbox"] {
+  accent-color: #6699ff;
+}
+</style>
