@@ -63,23 +63,24 @@ function toggleTheme() {
           <div class="text">{{ item.name }}</div>
         </div>
       </div>
-      <div class="theme-control">
-        <label class="android-switch">
-          <input type="checkbox" v-model="isDark" @change="toggleTheme" />
-          <span class="track"></span>
-          <span class="thumb"></span>
-        </label>
+      <div class="sidebar-bottom">
+        <div class="theme-control">
+          <label class="android-switch">
+            <input type="checkbox" v-model="isDark" @change="toggleTheme" />
+            <span class="track"></span>
+            <span class="thumb"></span>
+          </label>
+        </div>
+        <div class="sidebar-copyright">
+          <div>Copyright © 2026</div>
+          <div>SGL Team</div>
+        </div>
       </div>
     </div>
 
     <div class="content">
 
       <router-view />
-
-      <!-- 🔥 底部版权信息 -->
-      <div class="copyright">
-        Copyright © {{ new Date().getFullYear() }} SGL Team. All rights reserved.
-      </div>
     </div>
   </div>
 </template>
@@ -194,28 +195,33 @@ function toggleTheme() {
   overflow-y: auto;
   transition: all 0.3s ease;
   position: relative;
-  padding-bottom: 50px; /* 给版权留出空间 */
 }
 .layout.dark .content {
   background: #101118;
   color: #eee;
 }
 
-/* 🔥 底部版权样式 */
-.copyright {
-  position: absolute;
-  right: 28px;
-  bottom: 16px;
-  font-size: 12px;
-  color: #666;
-  transition: color 0.3s ease;
-}
-.layout.dark .copyright {
-  color: #aaa;
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .theme-control {
-  margin-bottom: 20px;
+  margin-bottom: 0;
+}
+
+.sidebar-copyright {
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  margin-bottom: 0;
+  transition: color 0.3s ease;
+  line-height: 1.3;
+}
+.layout.dark .sidebar-copyright {
+  color: #666;
 }
 .android-switch {
   display: inline-block;

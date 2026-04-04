@@ -190,7 +190,7 @@
     <!-- 信息输出栏 -->
     <div class="info-bar" :class="{ 'info-success': hasSuccessMessage, 'info-error': hasErrorMessage }">
       <h4>LOG信息</h4>
-      <div class="info-messages">
+      <div class="info-messages" ref="infoMessagesRef">
         <div 
           v-for="(msg, index) in infoMessages" 
           :key="index"
@@ -220,6 +220,7 @@ import { ref, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { resolve, join } from '@tauri-apps/api/path';
+import { nextTick } from 'vue';
 
 const fontFileName = ref('');
 const fontFilePath = ref(localStorage.getItem('lastFontFilePath') || '');
@@ -240,6 +241,7 @@ const iconFontUrl = ref('');
 const align = ref(1);
 const compress = ref(false);
 const isConverting = ref(false);
+const infoMessagesRef = ref(null);
 
 const showModal = ref(false);
 const modalTitle = ref('');
@@ -597,6 +599,12 @@ function addInfoMessage(content, type = 'info') {
   if (infoMessages.value.length > 5) {
     infoMessages.value.shift();
   }
+  // 滚动到底部
+  nextTick(() => {
+    if (infoMessagesRef.value) {
+      infoMessagesRef.value.scrollTop = infoMessagesRef.value.scrollHeight;
+    }
+  });
 }
 </script>
 
@@ -1053,6 +1061,8 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-height: calc(2 * (13px * 1.4 + 24px + 8px));
+  overflow-y: auto;
 }
 
 .info-message {
