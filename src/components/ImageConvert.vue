@@ -25,7 +25,38 @@
             <img :src="imagePreviewUrl" class="preview-image" alt="预览图片">
           </div>
           <div v-else class="preview-placeholder">
-            <span>请选择图片文件</span>
+            <span>请点击浏览，选择图片文件</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 格式设置 -->
+      <div class="form-section">
+        <div class="settings-row">
+          <div class="setting-item">
+            <label class="form-label">颜色格式</label>
+            <select v-model="colorFormat" class="form-select">
+              <option value="RGB888">RGB888</option>
+              <option value="RGB565">RGB565</option>
+              <option value="RGB232">RGB232</option>
+              <option value="ARGB888">ARGB888</option>
+              <option value="ARGB444">ARGB444</option>
+              <option value="ARGB222">ARGB222</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label class="form-label">输出格式</label>
+            <select v-model="outputFormat" class="form-select">
+              <option value="c">c文件</option>
+              <option value="bin">bin文件</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label class="form-label">压缩算法</label>
+            <select v-model="compression" class="form-select">
+              <option value="none">无压缩</option>
+              <option value="rle">RLE压缩</option>
+            </select>
           </div>
         </div>
       </div>
@@ -78,6 +109,9 @@ import { invoke } from '@tauri-apps/api/core';
 // 响应式数据
 const imageFilePath = ref('');
 const imagePreviewUrl = ref('');
+const colorFormat = ref('RGB888');
+const outputFormat = ref('c');
+const compression = ref('none');
 const isConverting = ref(false);
 const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
@@ -259,7 +293,7 @@ h2 {
 /* 图片预览样式 */
 .image-preview-container {
   width: 100%;
-  height: 400px;
+  height: 200px;
   border: 1px solid #ddd;
   border-radius: 6px;
   overflow: hidden;
@@ -288,6 +322,46 @@ h2 {
   color: #999;
   font-size: 14px;
   text-align: center;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-image: linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+                    linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+                    linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+
+/* 设置行样式 */
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.setting-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: #5a86ff;
 }
 
 .form-actions {
@@ -476,6 +550,24 @@ html.dark .preview-wrapper {
 
 html.dark .preview-placeholder {
   color: #666;
+  background-image: linear-gradient(45deg, #333 25%, transparent 25%),
+                    linear-gradient(-45deg, #333 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #333 75%),
+                    linear-gradient(-45deg, transparent 75%, #333 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+
+/* 深色主题下拉框样式 */
+html.dark .form-select {
+  background: #252a3a;
+  border-color: #3a3f55;
+  color: #e0e0e0;
+}
+
+html.dark .form-select:focus {
+  border-color: #6699ff;
+  background: #2f354a;
 }
 
 html.dark .info-bar {
