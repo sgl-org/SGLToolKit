@@ -215,7 +215,7 @@ const modalType = ref('info');
 const showCopyTip = ref(false);
 
 const canConvert = computed(() => {
-  return fontFilePath.value && charRanges.value.length > 0;
+  return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '');
 });
 
 const hasSuccessMessage = computed(() => {
