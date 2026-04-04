@@ -1121,9 +1121,9 @@ h2 {
 /* 图标预览样式 */
 .icon-preview-container {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-  gap: 8px;
-  max-height: 300px;
+  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  gap: 6px;
+  max-height: calc(4 * (50px + 6px) + 16px);
   overflow-y: auto;
   padding: 8px;
   border: 1px solid #e8e8e8;
@@ -1136,35 +1136,36 @@ h2 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 12px 8px;
+  padding: 6px 4px;
   border: 1px solid #ddd;
-  border-radius: 6px;
+  border-radius: 4px;
   background: white;
   cursor: pointer;
   transition: all 0.2s ease;
+  height: 50px;
 }
 
 .icon-item:hover {
   border-color: #5a86ff;
   background: #f0f5ff;
-  transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .icon-item.selected {
   border-color: #5a86ff;
   background: #e6f7ff;
-  box-shadow: 0 0 0 2px #5a86ff;
+  box-shadow: 0 0 0 1px #5a86ff;
 }
 
 .icon-char {
-  font-size: 28px;
-  margin-bottom: 4px;
+  font-size: 20px;
+  margin-bottom: 2px;
   font-family: 'Segoe UI Symbol', 'Arial Unicode MS', sans-serif;
 }
 
 .icon-code {
-  font-size: 10px;
+  font-size: 9px;
   color: #999;
   font-family: monospace;
 }
