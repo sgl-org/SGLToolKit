@@ -18,23 +18,48 @@
       </div>
 
       <div class="form-section">
-        <label class="form-label">字体大小</label>
-        <input 
-          v-model.number="fontSize" 
-          type="number" 
-          min="8" 
-          max="128" 
-          class="form-input spin-input"
-        />
-      </div>
-
-      <div class="form-section">
-        <label class="form-label">位深度 (BPP)</label>
-        <select v-model.number="bpp" class="form-select">
-          <option :value="1">1位 (单色)</option>
-          <option :value="2">2位 (4级灰度)</option>
-          <option :value="4">4位 (16级灰度)</option>
-        </select>
+        <div class="settings-row">
+          <div class="setting-item">
+            <label class="setting-label">字体大小</label>
+            <input 
+              v-model.number="fontSize" 
+              type="number" 
+              min="8" 
+              max="128" 
+              class="form-input setting-input"
+            />
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">位深度</label>
+            <select v-model.number="bpp" class="form-select setting-select">
+              <option :value="1">1位</option>
+              <option :value="2">2位</option>
+              <option :value="4">4位</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">对齐</label>
+            <select v-model.number="align" class="form-select setting-select">
+              <option :value="1">1字节</option>
+              <option :value="4">4字节</option>
+              <option :value="8">8字节</option>
+              <option :value="16">16字节</option>
+              <option :value="32">32字节</option>
+              <option :value="64">64字节</option>
+              <option :value="128">128字节</option>
+              <option :value="256">256字节</option>
+              <option :value="512">512字节</option>
+              <option :value="1024">1024字节</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">启用压缩</label>
+            <div class="setting-checkbox-box">
+              <input v-model="compress" type="checkbox" />
+              <span>压缩</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="form-section">
@@ -89,29 +114,6 @@
           />
           <button class="file-select-btn" @click="selectOutputDir">浏览</button>
         </div>
-      </div>
-
-      <div class="form-section">
-        <label class="form-label">对齐方式</label>
-        <select v-model.number="align" class="form-select">
-          <option :value="1">1字节</option>
-          <option :value="4">4字节</option>
-          <option :value="8">8字节</option>
-          <option :value="16">16字节</option>
-          <option :value="32">32字节</option>
-          <option :value="64">64字节</option>
-          <option :value="128">128字节</option>
-          <option :value="256">256字节</option>
-          <option :value="512">512字节</option>
-          <option :value="1024">1024字节</option>
-        </select>
-      </div>
-
-      <div class="form-section checkbox-section">
-        <label class="checkbox-label">
-          <input v-model="compress" type="checkbox" />
-          <span>启用压缩</span>
-        </label>
       </div>
 
       <div class="form-actions">
@@ -448,6 +450,56 @@ h2 {
 
 .spin-input {
   width: 120px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.setting-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-label {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+}
+
+.setting-input,
+.setting-select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.setting-checkbox-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  height: 40px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.setting-checkbox-box input[type="checkbox"] {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.setting-checkbox-box span {
+  font-size: 14px;
+  color: #333;
 }
 
 .range-inputs {
