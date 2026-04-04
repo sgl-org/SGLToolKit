@@ -128,7 +128,10 @@
       </div>
 
       <div class="form-section" v-if="iconFontFilePath">
-        <label class="form-label">图标预览</label>
+        <div class="form-label-with-button">
+          <label class="form-label">图标预览</label>
+          <button class="select-all-btn" @click="toggleSelectAllIcons">{{ allIconsSelected ? '全取消' : '全选' }}</button>
+        </div>
         <div class="icon-preview-container">
           <div 
             v-for="(icon, index) in iconList" 
@@ -248,6 +251,10 @@ const modalTitle = ref('');
 const modalContent = ref('');
 const modalType = ref('info');
 const showCopyTip = ref(false);
+
+const allIconsSelected = computed(() => {
+  return iconList.value.length > 0 && selectedIcons.value.length === iconList.value.length;
+});
 
 const canConvert = computed(() => {
   return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
@@ -455,6 +462,16 @@ function toggleIconSelection(icon) {
     selectedIcons.value.splice(index, 1);
   } else {
     selectedIcons.value.push(icon);
+  }
+}
+
+function toggleSelectAllIcons() {
+  if (allIconsSelected.value) {
+    // 全取消
+    selectedIcons.value = [];
+  } else {
+    // 全选
+    selectedIcons.value = [...iconList.value];
   }
 }
 
@@ -1129,6 +1146,44 @@ h2 {
 
 .copy-msg-btn:hover {
   background: #ff4d4f;
+  color: white;
+}
+
+.form-label-with-button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.select-all-btn {
+  background: transparent;
+  border: 1px solid #1890ff;
+  color: #1890ff;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.select-all-btn:hover {
+  background: #1890ff;
+  color: white;
+}
+
+/* 深色主题样式 */
+html.dark .form-label-with-button .form-label {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+html.dark .select-all-btn {
+  border-color: #40a9ff;
+  color: #40a9ff;
+}
+
+html.dark .select-all-btn:hover {
+  background: #40a9ff;
   color: white;
 }
 
