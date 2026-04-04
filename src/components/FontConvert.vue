@@ -113,7 +113,7 @@
         ></textarea>
       </div>
 
-      <div class="form-section">
+      <div class="form-section icon-font-section">
         <label class="form-label">图标字体文件</label>
         <div class="file-input-wrapper">
           <input 
@@ -654,6 +654,10 @@ h2 {
 
 .form-section {
   margin-bottom: 12px;
+}
+
+.icon-font-section {
+  margin-top: 20px;
 }
 
 .form-label {
