@@ -1,0 +1,13 @@
+node_modules
+coverage
+.nyc_output
+dist
+.cache
+*.log
+*.swp
+.vscode
+*.exe
+*.ttf
+font_output
+*.otf
+package-lock.json
