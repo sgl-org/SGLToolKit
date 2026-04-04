@@ -760,11 +760,10 @@ h2 {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid #ddd;
   border-radius: 6px;
   background: white;
-  height: 40px;
   box-sizing: border-box;
   cursor: pointer;
 }
