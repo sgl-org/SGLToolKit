@@ -58,6 +58,16 @@
               <option value="rle">RLE压缩</option>
             </select>
           </div>
+          <div class="setting-item">
+            <label class="form-label">透明填充</label>
+            <div class="transparent-fill-container">
+              <input v-model="enableTransparentFill" type="checkbox" class="transparent-fill-checkbox">
+              <div class="color-input-group">
+                <input v-model="transparentFillColor" type="text" class="color-input" placeholder="#000000">
+                <input v-model="transparentFillColor" type="color" class="color-picker">
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -112,6 +122,8 @@ const imagePreviewUrl = ref('');
 const colorFormat = ref('RGB888');
 const outputFormat = ref('c');
 const compression = ref('none');
+const enableTransparentFill = ref(false);
+const transparentFillColor = ref('#000000');
 const isConverting = ref(false);
 const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
@@ -364,6 +376,59 @@ h2 {
   border-color: #5a86ff;
 }
 
+/* 透明填充样式 */
+.transparent-fill-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  box-sizing: border-box;
+  height: 36px;
+}
+
+.transparent-fill-checkbox {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.color-input-group {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.color-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+  height: 26px;
+}
+
+.color-input:focus {
+  outline: none;
+  border-color: #5a86ff;
+}
+
+.color-picker {
+  width: 32px;
+  height: 26px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
 .form-actions {
   display: flex;
   gap: 12px;
@@ -568,6 +633,31 @@ html.dark .form-select {
 html.dark .form-select:focus {
   border-color: #6699ff;
   background: #2f354a;
+}
+
+/* 深色主题透明填充样式 */
+html.dark .transparent-fill-container {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .color-input {
+  background: #1a1d2b;
+  border-color: #3a3f55;
+  color: #e0e0e0;
+}
+
+html.dark .color-input:focus {
+  border-color: #6699ff;
+  background: #2f354a;
+}
+
+html.dark .color-picker {
+  border-color: #3a3f55;
+}
+
+html.dark .transparent-fill-checkbox {
+  accent-color: #6699ff;
 }
 
 html.dark .info-bar {
