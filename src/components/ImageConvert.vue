@@ -71,6 +71,37 @@
         </div>
       </div>
 
+      <!-- 附加设置 -->
+      <div class="form-section">
+        <div class="settings-row">
+          <div class="setting-item">
+            <label class="form-label">数组名</label>
+            <input v-model="arrayName" type="text" class="form-input" placeholder="输入数组名">
+          </div>
+          <div class="setting-item">
+            <label class="form-label">输出文件名</label>
+            <input v-model="outputFileName" type="text" class="form-input" placeholder="输入输出文件名">
+          </div>
+          <div class="setting-item">
+            <label class="form-label">BIN格式起始地址(hex)</label>
+            <input v-model="binStartAddress" type="text" class="form-input" placeholder="0x0000">
+          </div>
+          <div class="setting-item">
+            <label class="form-label">杂项</label>
+            <div class="misc-container">
+              <div class="misc-item">
+                <input v-model="combineAsArray" type="checkbox" class="form-checkbox">
+                <span>组合为数组</span>
+              </div>
+              <div class="misc-item">
+                <input v-model="swapBytes" type="checkbox" class="form-checkbox">
+                <span>交换字节</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 转换按钮 -->
       <div class="form-actions">
         <button 
@@ -124,6 +155,11 @@ const outputFormat = ref('c');
 const compression = ref('none');
 const enableTransparentFill = ref(false);
 const transparentFillColor = ref('#000000');
+const arrayName = ref('');
+const outputFileName = ref('');
+const binStartAddress = ref('0x0000');
+const combineAsArray = ref(false);
+const swapBytes = ref(false);
 const isConverting = ref(false);
 const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
@@ -350,7 +386,7 @@ h2 {
 /* 设置行样式 */
 .settings-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -427,6 +463,52 @@ h2 {
   border-radius: 4px;
   cursor: pointer;
   padding: 0;
+}
+
+/* 复选框容器样式 */
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  box-sizing: border-box;
+  height: 36px;
+}
+
+.form-checkbox {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* 杂项容器样式 */
+.misc-container {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  box-sizing: border-box;
+  height: 36px;
+  width: 100%;
+}
+
+.misc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.misc-item span {
+  font-size: 14px;
+  color: #333;
 }
 
 .form-actions {
@@ -658,6 +740,26 @@ html.dark .color-picker {
 
 html.dark .transparent-fill-checkbox {
   accent-color: #6699ff;
+}
+
+/* 深色主题复选框容器样式 */
+html.dark .checkbox-container {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .form-checkbox {
+  accent-color: #6699ff;
+}
+
+/* 深色主题杂项容器样式 */
+html.dark .misc-container {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .misc-item span {
+  color: #e0e0e0;
 }
 
 html.dark .info-bar {
