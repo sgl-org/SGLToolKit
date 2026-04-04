@@ -36,8 +36,40 @@ function estimate_sparse_tiny_size(count) {
 }
 
 module.exports = function cmap_split(all_codepoints) {
+  console.log(`调试: 进入build_subtables，字符数量: ${all_codepoints.length}`);
+  
   all_codepoints = all_codepoints.sort((a, b) => a - b);
+  console.log(`调试: 排序后字符范围: 0x${all_codepoints[0].toString(16)} - 0x${all_codepoints[all_codepoints.length - 1].toString(16)}`);
 
+  // 限制每个子表的最大字符数量，避免生成过大的子表
+  const MAX_CHARS_PER_SUBTABLE = 0x100000;
+  
+  // 如果字符数量超过限制，将其分成多个块
+  if (all_codepoints.length > MAX_CHARS_PER_SUBTABLE) {
+    console.log(`调试: 字符数量超过限制，将分成多个块`);
+    let result = [];
+    let current_chunk = [];
+    
+    for (let i = 0; i < all_codepoints.length; i++) {
+      current_chunk.push(all_codepoints[i]);
+      
+      // 当达到最大字符数量或到达数组末尾时，创建一个新的子表
+      if (current_chunk.length >= MAX_CHARS_PER_SUBTABLE || i === all_codepoints.length - 1) {
+        // 为每个块创建一个sparse_tiny子表
+        result.push(['sparse_tiny', current_chunk]);
+        current_chunk = [];
+      }
+    }
+    
+    console.log(`调试: 生成的子表数量: ${result.length}`);
+    result.forEach(([format, codepoints], index) => {
+      console.log(`调试: 子表 ${index}, 格式: ${format}, 字符数量: ${codepoints.length}, 范围: 0x${codepoints[0].toString(16)} - 0x${codepoints[codepoints.length - 1].toString(16)}`);
+    });
+    
+    return result;
+  }
+
+  // 原始逻辑，用于处理字符数量较少的情况
   let min_paths = [];
 
   for (let i = 0; i < all_codepoints.length; i++) {
@@ -76,7 +108,8 @@ module.exports = function cmap_split(all_codepoints) {
       }
 
       // tiny sparse will always be preferred over full sparse because glyph ids are consecutive
-      if (all_codepoints[i] - all_codepoints[j] < 65536) {
+      // 增加对中文字符的支持，扩大范围限制
+      if (all_codepoints[i] - all_codepoints[j] < 0x100000) { // 扩大到1MB范围，支持更多中文字符
         s = estimate_sparse_tiny_size(i - j + 1);
 
         if (prev_dist + s < min.dist) {
@@ -101,5 +134,10 @@ module.exports = function cmap_split(all_codepoints) {
     i = path.start - 1;
   }
 
+  console.log(`调试: 生成的子表数量: ${result.length}`);
+  result.forEach(([format, codepoints], index) => {
+    console.log(`调试: 子表 ${index}, 格式: ${format}, 字符数量: ${codepoints.length}, 范围: 0x${codepoints[0].toString(16)} - 0x${codepoints[codepoints.length - 1].toString(16)}`);
+  });
+  
   return result;
 };
