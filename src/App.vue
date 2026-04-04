@@ -63,9 +63,6 @@ function toggleTheme() {
           <div class="text">{{ item.name }}</div>
         </div>
       </div>
-    </div>
-
-    <div class="content">
       <div class="theme-control">
         <label class="android-switch">
           <input type="checkbox" v-model="isDark" @change="toggleTheme" />
@@ -73,6 +70,9 @@ function toggleTheme() {
           <span class="thumb"></span>
         </label>
       </div>
+    </div>
+
+    <div class="content">
 
       <router-view />
 
@@ -104,7 +104,9 @@ function toggleTheme() {
   box-shadow: 0 0 18px rgba(0,0,0,0.05);
   padding: 15px 0;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   transition: background 0.3s;
 }
 .layout.dark .sidebar {
@@ -213,9 +215,7 @@ function toggleTheme() {
 }
 
 .theme-control {
-  position: absolute;
-  top: 22px;
-  right: 28px;
+  margin-bottom: 20px;
 }
 .android-switch {
   display: inline-block;

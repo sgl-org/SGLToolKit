@@ -1,7 +1,5 @@
 <template>
   <div class="page-container">
-    <h2>字体转换</h2>
-    
     <div class="converter-form">
       <div class="form-section">
         <label class="form-label">字体文件</label>
@@ -421,7 +419,7 @@ function addInfoMessage(content, type = 'info') {
 <style scoped>
 .page-container {
   padding: 30px;
-  max-width: 800px;
+  max-width: 1920px;
   margin: 0 auto;
 }
 
@@ -432,13 +430,13 @@ h2 {
 
 .converter-form {
   background: white;
-  padding: 30px;
+  padding: 20px;
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
 }
 
 .form-section {
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 
 .form-label {
@@ -452,7 +450,7 @@ h2 {
 .form-input,
 .form-select {
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 14px;
@@ -835,7 +833,7 @@ h2 {
 /* 信息输出栏样式 */
 .info-bar {
   margin-top: 24px;
-  padding: 16px;
+  padding: 12px;
   border: 1px solid #e8e8e8;
   border-radius: 8px;
   background: #fafafa;
