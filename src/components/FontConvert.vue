@@ -138,7 +138,7 @@
             :class="{ selected: selectedIcons.includes(icon) }"
           >
             <div class="icon-char">{{ icon.char }}</div>
-            <div class="icon-code">U+{{ icon.code.toString(16).toUpperCase().padStart(4, '0') }}</div>
+            <div class="icon-code">U+{{ icon.code > 0xFFFF ? icon.code.toString(16).toUpperCase().padStart(6, '0') : icon.code.toString(16).toUpperCase().padStart(4, '0') }}</div>
           </div>
           <div v-if="iconList.length === 0" class="no-icons">暂无图标</div>
         </div>
@@ -236,6 +236,7 @@ const outputDirPath = ref(localStorage.getItem('lastOutputDirPath') || '');
 const iconFontFilePath = ref('');
 const iconList = ref([]);
 const selectedIcons = ref([]);
+const iconFontUrl = ref('');
 const align = ref(1);
 const compress = ref(false);
 const isConverting = ref(false);
@@ -347,6 +348,42 @@ async function parseIconFont(filePath) {
     
     const font = opentype.parse(arrayBuffer);
     console.log('字体解析成功，字体名称:', font.names.fontFamily);
+    console.log('字体表数量:', font.tables ? Object.keys(font.tables).length : 0);
+    
+    // 移除旧的字体样式
+    const oldStyle = document.getElementById('icon-font-style');
+    if (oldStyle) {
+      oldStyle.remove();
+    }
+    if (iconFontUrl.value) {
+      URL.revokeObjectURL(iconFontUrl.value);
+    }
+    
+    // 创建字体 URL 用于显示
+    const fontBlob = new Blob([bytes], { type: 'font/ttf' });
+    const fontUrl = URL.createObjectURL(fontBlob);
+    iconFontUrl.value = fontUrl;
+    
+    // 动态创建 @font-face 样式
+    const fontFaceStyle = document.createElement('style');
+    fontFaceStyle.id = 'icon-font-style';
+    fontFaceStyle.textContent = `
+      @font-face {
+        font-family: 'IconFont';
+        src: url('${fontUrl}') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+        font-display: swap;
+      }
+      .icon-char {
+        font-family: 'IconFont', 'Font Awesome 6 Free', 'Font Awesome 5 Free', 'FontAwesome', sans-serif !important;
+      }
+    `;
+    document.head.appendChild(fontFaceStyle);
+    
+    // 等待字体加载
+    await document.fonts.load('16px IconFont');
+    console.log('字体加载完成');
     
     const icons = [];
     const glyphNames = Object.keys(font.glyphs.glyphs);
@@ -356,18 +393,50 @@ async function parseIconFont(filePath) {
       const glyph = font.glyphs.glyphs[name];
       if (glyph && glyph.unicode !== undefined && glyph.unicode !== null) {
         const unicode = glyph.unicode;
-        if (unicode >= 0xE000 && unicode <= 0xF8FF) {
+        // Font Awesome 图标通常在私用区 (Private Use Area)
+        // 基本多文种平面 (BMP): U+E000-U+F8FF
+        // 第一辅助平面: U+F0000-U+FFFFD (Font Awesome 6+)
+        // 第二辅助平面: U+100000-U+10FFFD
+        // Font Awesome 7/8 常用范围
+        if ((unicode >= 0xE000 && unicode <= 0xF8FF) || 
+            (unicode >= 0xF000 && unicode <= 0xF2FF) ||
+            (unicode >= 0xF400 && unicode <= 0xF4FF) ||
+            (unicode >= 0x2000 && unicode <= 0x2BFF) ||
+            (unicode >= 0x1F000 && unicode <= 0x1FFFF) ||  // 第一辅助平面
+            (unicode >= 0xF0000 && unicode <= 0xFFFFD) ||   // 私用区补充 A
+            (unicode >= 0x100000 && unicode <= 0x10FFFD)) { // 私用区补充 B
           icons.push({
             code: unicode,
-            char: String.fromCharCode(unicode),
+            char: String.fromCodePoint(unicode),
             name: name
           });
         }
       }
     });
     
+    // 如果没有找到图标，尝试包含所有非零 unicode 的字形
+    if (icons.length === 0) {
+      console.log('在标准范围内未找到图标，尝试包含所有字形...');
+      glyphNames.forEach(name => {
+        const glyph = font.glyphs.glyphs[name];
+        if (glyph && glyph.unicode !== undefined && glyph.unicode !== null && glyph.unicode > 0) {
+          icons.push({
+            code: glyph.unicode,
+            char: glyph.unicode > 0xFFFF ? String.fromCodePoint(glyph.unicode) : String.fromCharCode(glyph.unicode),
+            name: name
+          });
+        }
+      });
+    }
+    
     icons.sort((a, b) => a.code - b.code);
     console.log('找到图标数量:', icons.length);
+    
+    // 显示前10个图标的详细信息用于调试
+    if (icons.length > 0) {
+      console.log('前10个图标:', icons.slice(0, 10));
+    }
+    
     iconList.value = icons;
     selectedIcons.value = [];
   } catch (err) {
