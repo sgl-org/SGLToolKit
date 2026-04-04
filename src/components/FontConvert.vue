@@ -157,6 +157,32 @@
     </div>
 
     <div v-if="showCopyTip" class="copy-tip">复制成功！</div>
+
+    <!-- 信息输出栏 -->
+    <div class="info-bar" :class="{ 'info-success': hasSuccessMessage, 'info-error': hasErrorMessage }">
+      <h4>LOG信息</h4>
+      <div class="info-messages">
+        <div 
+          v-for="(msg, index) in infoMessages" 
+          :key="index"
+          :class="['info-message', msg.type]"
+        >
+          <span class="msg-time">{{ msg.time }}</span>
+          <span class="msg-content">{{ msg.content }}</span>
+          <button 
+            v-if="msg.type === 'error'" 
+            class="copy-msg-btn"
+            @click="copyMessageContent(msg.content)"
+            title="复制内容"
+          >
+            复制
+          </button>
+        </div>
+        <div v-if="infoMessages.length === 0" class="empty-log">
+          暂无日志信息
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -168,10 +194,11 @@ import { resolve, join } from '@tauri-apps/api/path';
 
 const fontFileName = ref('');
 const fontFilePath = ref('');
-const fontName = ref('');
+const fontName = ref('sgl_font');
 const fontSize = ref(24);
 const bpp = ref(4);
 const charRangeStart = ref('0x20');
+const infoMessages = ref([]);
 const charRangeEnd = ref('0x7F');
 const charRanges = ref([{ start: 0x20, end: 0x7F }]);
 const customChars = ref('');
@@ -188,7 +215,15 @@ const modalType = ref('info');
 const showCopyTip = ref(false);
 
 const canConvert = computed(() => {
-  return fontFilePath.value !== '' && charRanges.value.length > 0;
+  return fontFilePath.value && charRanges.value.length > 0;
+});
+
+const hasSuccessMessage = computed(() => {
+  return infoMessages.value.some(msg => msg.type === 'info');
+});
+
+const hasErrorMessage = computed(() => {
+  return infoMessages.value.some(msg => msg.type === 'error');
 });
 
 async function selectFontFile() {
@@ -334,17 +369,11 @@ async function convertFont() {
     const result = await invoke("run_shell_command", { cmd: exePath, args });
 
     console.log("转换成功:", result);
-    modalTitle.value = '转换成功';
-    modalContent.value = result;
-    modalType.value = 'info';
-    showModal.value = true;
+    addInfoMessage(`转换成功！\n${result}`, 'info');
 
   } catch (err) {
     console.error("转换失败:", err);
-    modalTitle.value = '转换失败';
-    modalContent.value = String(err);
-    modalType.value = 'error';
-    showModal.value = true;
+    addInfoMessage(`转换失败：\n${String(err)}`, 'error');
   } finally {
     isConverting.value = false;
   }
@@ -364,6 +393,25 @@ async function copyError() {
     setTimeout(() => showCopyTip.value = false, 1000);
   } catch (err) {
     console.error('复制失败：', err);
+  }
+}
+
+async function copyMessageContent(content) {
+  try {
+    await navigator.clipboard.writeText(content);
+    showCopyTip.value = true;
+    setTimeout(() => showCopyTip.value = false, 1000);
+  } catch (err) {
+    console.error('复制失败：', err);
+  }
+}
+
+function addInfoMessage(content, type = 'info') {
+  const time = new Date().toLocaleString('zh-CN');
+  infoMessages.value.push({ time, content, type });
+  // 限制最多显示5条信息
+  if (infoMessages.value.length > 5) {
+    infoMessages.value.shift();
   }
 }
 </script>
@@ -780,5 +828,99 @@ h2 {
   20% { opacity: 1; }
   80% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* 信息输出栏样式 */
+.info-bar {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fafafa;
+  transition: all 0.3s ease;
+}
+
+.info-bar.info-success {
+  border-color: #52c41a;
+  background: #f6ffed;
+}
+
+.info-bar.info-error {
+  border-color: #ff4d4f;
+  background: #fff1f0;
+}
+
+.info-bar h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
+.empty-log {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  padding: 20px 0;
+  font-style: italic;
+}
+
+.info-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-message {
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.info-message.info {
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
+  color: #1890ff;
+}
+
+.info-message.error {
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  color: #ff4d4f;
+}
+
+.msg-time {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+  min-width: 120px;
+}
+
+.msg-content {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.copy-msg-btn {
+  background: transparent;
+  border: 1px solid #ff4d4f;
+  color: #ff4d4f;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.copy-msg-btn:hover {
+  background: #ff4d4f;
+  color: white;
 }
 </style>
