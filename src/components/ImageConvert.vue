@@ -17,7 +17,12 @@
               :key="index"
               class="preview-item"
             >
-              <img :src="image.previewUrl" class="preview-image" alt="预览图片">
+              <div class="preview-image-wrapper">
+                <img :src="image.previewUrl" class="preview-image" alt="预览图片">
+                <div class="preview-resolution-overlay" v-if="image.width && image.height">
+                  {{ image.width }} × {{ image.height }}
+                </div>
+              </div>
               <div class="preview-info">
                 <span class="preview-name">{{ image.name }}</span>
                 <button class="remove-image-btn" @click="removeImage(index)" title="删除">×</button>
@@ -199,11 +204,23 @@ async function selectImageFile() {
           const blob = new Blob([bytes], { type: 'image/*' });
           const url = URL.createObjectURL(blob);
           
-          imageFiles.value.push({
+          const imageInfo = {
             path: filePath,
             previewUrl: url,
-            name: filePath.split(/[/\\]/).pop() || '未命名'
-          });
+            name: filePath.split(/[/\\]/).pop() || '未命名',
+            width: 0,
+            height: 0
+          };
+          
+          const index = imageFiles.value.length;
+          imageFiles.value.push(imageInfo);
+          
+          const img = new Image();
+          img.onload = () => {
+            imageFiles.value[index].width = img.naturalWidth;
+            imageFiles.value[index].height = img.naturalHeight;
+          };
+          img.src = url;
         } catch (previewErr) {
           console.error('生成预览失败：', previewErr);
           addInfoMessage(`生成预览失败: ${previewErr.message || JSON.stringify(previewErr)}`, 'error');
@@ -394,11 +411,29 @@ h2 {
   overflow: hidden;
 }
 
-.preview-item .preview-image {
+.preview-image-wrapper {
+  position: relative;
   width: 100%;
   height: 120px;
-  object-fit: contain;
   background: #fafafa;
+}
+
+.preview-item .preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.preview-resolution-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  font-size: 11px;
+  padding: 2px 6px;
+  text-align: center;
 }
 
 .preview-info {
@@ -770,6 +805,10 @@ html.dark .image-preview-container {
 html.dark .preview-item {
   border-color: #3a3f55;
   background: #1a1d2b;
+}
+
+html.dark .preview-image-wrapper {
+  background: #252a3a;
 }
 
 html.dark .preview-item .preview-image {
