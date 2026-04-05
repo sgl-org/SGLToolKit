@@ -639,10 +639,18 @@ async function copyResult(code) {
 // 下载转换结果
 async function downloadResult(code, filename) {
   try {
-    // 去除文件后缀
-    const filenameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-    const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-    const defaultFileName = `${safeFilename}.c`;
+    // 生成文件名：使用数组名输入框的值
+    let defaultFileName;
+    if (combineAsArray.value && imageFiles.value.length > 1) {
+      // 组合数组模式：使用数组名输入框的值
+      const safeArrayName = arrayName.value.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+      defaultFileName = `${safeArrayName}.c`;
+    } else {
+      // 单个文件模式：使用原文件名
+      const filenameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+      const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+      defaultFileName = `${safeFilename}.c`;
+    }
     
     console.log('开始下载，文件名:', defaultFileName);
     
