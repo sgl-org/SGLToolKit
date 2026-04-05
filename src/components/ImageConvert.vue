@@ -463,7 +463,7 @@ async function generateCArray(image, index) {
   cCode += `};\n\n`;
   
   // 生成sgl_pixmap_t结构
-  const pixmapName = arrayName.value || `${safeFilename}_image`;
+  const pixmapName = combineAsArray.value ? (arrayName.value || `${safeFilename}_image`) : `${safeFilename}_image`;
   cCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
   cCode += `    .width = ${width},\n`;
   cCode += `    .height = ${height},\n`;
