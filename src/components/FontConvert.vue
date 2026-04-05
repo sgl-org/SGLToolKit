@@ -546,9 +546,10 @@ async function convertFont() {
     // 检查是否需要添加图标字体文件
     if (iconFontFilePath.value && selectedIcons.value.length > 0) {
       args.push('--font', iconFontFilePath.value);
-      // 添加图标字体的范围
-      for (const icon of selectedIcons.value) {
-        args.push('-r', `0x${icon.code.toString(16)}`);
+      // 添加图标字体的符号（使用--symbols）
+      const iconSymbols = selectedIcons.value.map(icon => icon.char).join('');
+      if (iconSymbols) {
+        args.push('--symbols', iconSymbols);
       }
     }
 
