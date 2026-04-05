@@ -539,7 +539,9 @@ async function convertFont() {
       }
       // 添加主字体的自定义字符
       if (customChars.value) {
-        args.push('--symbols', customChars.value);
+        // 对自定义字符按Unicode码点排序
+        const sortedChars = customChars.value.split('').sort((a, b) => a.codePointAt(0) - b.codePointAt(0)).join('');
+        args.push('--symbols', sortedChars);
       }
     }
 
@@ -547,7 +549,9 @@ async function convertFont() {
     if (iconFontFilePath.value && selectedIcons.value.length > 0) {
       args.push('--font', iconFontFilePath.value);
       // 添加图标字体的符号（使用--symbols）
-      const iconSymbols = selectedIcons.value.map(icon => icon.char).join('');
+      // 对图标按Unicode码点排序
+      const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
+      const iconSymbols = sortedIcons.map(icon => icon.char).join('');
       if (iconSymbols) {
         args.push('--symbols', iconSymbols);
       }
