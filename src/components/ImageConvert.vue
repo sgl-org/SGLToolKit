@@ -589,9 +589,12 @@ function getImagePixelData(image) {
           // 使用透明填充颜色
           const fillColor = parseColor(transparentFillColor.value);
           if (fillColor) {
-            r = fillColor.r;
-            g = fillColor.g;
-            b = fillColor.b;
+            // 计算透明度因子
+            const alphaFactor = a / 255;
+            // 混色算法：原始颜色 * 透明度 + 填充颜色 * (1 - 透明度)
+            r = Math.round(r * alphaFactor + fillColor.r * (1 - alphaFactor));
+            g = Math.round(g * alphaFactor + fillColor.g * (1 - alphaFactor));
+            b = Math.round(b * alphaFactor + fillColor.b * (1 - alphaFactor));
           }
         }
         
