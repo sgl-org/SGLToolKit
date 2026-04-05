@@ -129,6 +129,26 @@
           {{ isConverting ? '转换中...' : '开始转换' }}
         </button>
       </div>
+
+      <!-- 转换后预览框 -->
+      <div v-if="conversionPreviews.length > 0" class="form-section">
+        <div class="form-label">转换后预览</div>
+        <div class="conversion-preview-container">
+          <div class="preview-grid">
+            <div v-for="(preview, index) in conversionPreviews" :key="index" class="preview-item">
+              <div class="preview-image-wrapper">
+                <img :src="preview.url" class="preview-image" alt="转换后预览">
+                <div class="preview-resolution-overlay" v-if="preview.width && preview.height">
+                  {{ preview.width }} × {{ preview.height }}
+                </div>
+              </div>
+              <div class="preview-info">
+                <span class="preview-name">{{ preview.name }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 转换结果 -->
@@ -215,6 +235,7 @@ const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
 const showCopyTip = ref(false);
 const conversionResults = ref([]);
+const conversionPreviews = ref([]);
 
 // 加载保存的设置
 function loadSettings() {
@@ -374,15 +395,210 @@ function clearAllImages() {
   imageFiles.value = [];
 }
 
+// 生成转换后预览
+async function generatePreview(image) {
+  return new Promise((resolve, reject) => {
+    // 首先获取转换后的像素数据
+    getImagePixelData(image).then(bitmapData => {
+      const format = colorFormat.value;
+      const width = image.width || 32;
+      const height = image.height || 32;
+      const bytesPerPixel = getBytesPerPixel(format);
+      
+      // 创建画布
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const imageData = ctx.createImageData(width, height);
+      const data = imageData.data;
+      
+      // 将转换后的像素数据转换回RGBA格式
+      let offset = 0;
+      let pixelCount = 0;
+      
+      // 检查是否是RLE压缩数据
+      if (compression.value === 'rle') {
+        // 解压RLE数据
+        let i = 0;
+        while (i < bitmapData.length && pixelCount < width * height) {
+          const count = bitmapData[i];
+          i++;
+          
+          let r, g, b, a = 255;
+          
+          switch (format) {
+            case 'RGB888':
+              // RGB888: 按 B, G, R 顺序（小端序）
+              b = bitmapData[i];
+              g = bitmapData[i + 1];
+              r = bitmapData[i + 2];
+              i += 3;
+              break;
+            case 'RGB565':
+              // RGB565: 5 bits R, 6 bits G, 5 bits B（小端序）
+              const rgb565 = bitmapData[i] | (bitmapData[i + 1] << 8);
+              r = ((rgb565 >> 11) & 0x1F) << 3;
+              g = ((rgb565 >> 5) & 0x3F) << 2;
+              b = (rgb565 & 0x1F) << 3;
+              i += 2;
+              break;
+            case 'RGB332':
+              // RGB332: 3 bits R, 3 bits G, 2 bits B
+              const rgb332 = bitmapData[i];
+              r = ((rgb332 >> 5) & 0x07) << 5;
+              g = ((rgb332 >> 2) & 0x07) << 5;
+              b = (rgb332 & 0x03) << 6;
+              i += 1;
+              break;
+            case 'ARGB8888':
+              // ARGB8888: 按 B, G, R, A 顺序（小端序）
+              b = bitmapData[i];
+              g = bitmapData[i + 1];
+              r = bitmapData[i + 2];
+              a = bitmapData[i + 3];
+              i += 4;
+              break;
+            case 'ARGB4444':
+              // ARGB4444: 4 bits each
+              const argb4444 = bitmapData[i] | (bitmapData[i + 1] << 8);
+              a = ((argb4444 >> 12) & 0x0F) << 4;
+              r = ((argb4444 >> 8) & 0x0F) << 4;
+              g = ((argb4444 >> 4) & 0x0F) << 4;
+              b = (argb4444 & 0x0F) << 4;
+              i += 2;
+              break;
+            case 'ARGB2222':
+              // ARGB2222: 2 bits each
+              const argb2222 = bitmapData[i];
+              a = ((argb2222 >> 6) & 0x03) << 6;
+              r = ((argb2222 >> 4) & 0x03) << 6;
+              g = ((argb2222 >> 2) & 0x03) << 6;
+              b = (argb2222 & 0x03) << 6;
+              i += 1;
+              break;
+            default:
+              // 默认使用RGB888
+              r = bitmapData[i];
+              g = bitmapData[i + 1];
+              b = bitmapData[i + 2];
+              i += 3;
+          }
+          
+          // 写入多个相同的像素
+          for (let j = 0; j < count && pixelCount < width * height; j++) {
+            const pixelIndex = pixelCount * 4;
+            data[pixelIndex] = r;
+            data[pixelIndex + 1] = g;
+            data[pixelIndex + 2] = b;
+            data[pixelIndex + 3] = a;
+            pixelCount++;
+          }
+        }
+      } else {
+        // 非压缩数据
+        while (offset < bitmapData.length && pixelCount < width * height) {
+          let r, g, b, a = 255;
+          
+          switch (format) {
+            case 'RGB888':
+              // RGB888: 按 B, G, R 顺序（小端序）
+              b = bitmapData[offset];
+              g = bitmapData[offset + 1];
+              r = bitmapData[offset + 2];
+              offset += 3;
+              break;
+            case 'RGB565':
+              // RGB565: 5 bits R, 6 bits G, 5 bits B（小端序）
+              const rgb565 = bitmapData[offset] | (bitmapData[offset + 1] << 8);
+              r = ((rgb565 >> 11) & 0x1F) << 3;
+              g = ((rgb565 >> 5) & 0x3F) << 2;
+              b = (rgb565 & 0x1F) << 3;
+              offset += 2;
+              break;
+            case 'RGB332':
+              // RGB332: 3 bits R, 3 bits G, 2 bits B
+              const rgb332 = bitmapData[offset];
+              r = ((rgb332 >> 5) & 0x07) << 5;
+              g = ((rgb332 >> 2) & 0x07) << 5;
+              b = (rgb332 & 0x03) << 6;
+              offset += 1;
+              break;
+            case 'ARGB8888':
+              // ARGB8888: 按 B, G, R, A 顺序（小端序）
+              b = bitmapData[offset];
+              g = bitmapData[offset + 1];
+              r = bitmapData[offset + 2];
+              a = bitmapData[offset + 3];
+              offset += 4;
+              break;
+            case 'ARGB4444':
+              // ARGB4444: 4 bits each
+              const argb4444 = bitmapData[offset] | (bitmapData[offset + 1] << 8);
+              a = ((argb4444 >> 12) & 0x0F) << 4;
+              r = ((argb4444 >> 8) & 0x0F) << 4;
+              g = ((argb4444 >> 4) & 0x0F) << 4;
+              b = (argb4444 & 0x0F) << 4;
+              offset += 2;
+              break;
+            case 'ARGB2222':
+              // ARGB2222: 2 bits each
+              const argb2222 = bitmapData[offset];
+              a = ((argb2222 >> 6) & 0x03) << 6;
+              r = ((argb2222 >> 4) & 0x03) << 6;
+              g = ((argb2222 >> 2) & 0x03) << 6;
+              b = (argb2222 & 0x03) << 6;
+              offset += 1;
+              break;
+            default:
+              // 默认使用RGB888
+              r = bitmapData[offset];
+              g = bitmapData[offset + 1];
+              b = bitmapData[offset + 2];
+              offset += 3;
+          }
+          
+          // 写入RGBA数据
+          const pixelIndex = pixelCount * 4;
+          data[pixelIndex] = r;
+          data[pixelIndex + 1] = g;
+          data[pixelIndex + 2] = b;
+          data[pixelIndex + 3] = a;
+          pixelCount++;
+        }
+      }
+      
+      // 绘制到画布
+      ctx.putImageData(imageData, 0, 0);
+      const previewUrl = canvas.toDataURL('image/png');
+      
+      resolve({
+        name: image.name,
+        url: previewUrl,
+        width: width,
+        height: height
+      });
+    }).catch(err => {
+      reject(err);
+    });
+  });
+}
+
 // 转换图片
 async function convertImage() {
   if (!canConvert.value || isConverting.value) return;
 
   isConverting.value = true;
   conversionResults.value = [];
+  conversionPreviews.value = [];
 
   try {
     addInfoMessage('开始转换图片...', 'info');
+    
+    // 生成预览
+    const previewPromises = imageFiles.value.map(image => generatePreview(image));
+    const previews = await Promise.all(previewPromises);
+    conversionPreviews.value = previews;
     
     if (combineAsArray.value && imageFiles.value.length > 1) {
       // 生成组合数组
@@ -1038,6 +1254,24 @@ h2 {
   background: #f5f5f5;
 }
 
+/* 转换后预览样式 */
+.conversion-preview-container {
+  width: 100%;
+  min-height: 200px;
+  max-height: 400px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow-y: auto;
+  background: #f5f5f5;
+}
+
+.conversion-preview-container .preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+
 .preview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -1260,6 +1494,7 @@ h2 {
   display: flex;
   gap: 12px;
   margin-top: 32px;
+  margin-bottom: 20px;
 }
 
 .convert-btn {
