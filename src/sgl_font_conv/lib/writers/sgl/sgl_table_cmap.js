@@ -28,16 +28,10 @@ class SglCmap extends Cmap {
 
     const f = this.font;
 
-    console.log(`调试: 处理字符数量: ${f.src.glyphs.length}`);
-    
     let subtables_plan = build_subtables(f.src.glyphs.map(g => g.code));
-    console.log(`调试: 子表数量: ${subtables_plan.length}`);
-    
     let idx = 0;
 
     for (let [format, codepoints] of subtables_plan) {
-      console.log(`调试: 处理子表 ${idx}, 格式: ${format}, 字符数量: ${codepoints.length}`);
-      
       let g = this.glyphByCode(codepoints[0]);
       let start_glyph_id = f.glyph_id[g.code];
       let min_code = codepoints[0];
@@ -102,18 +96,10 @@ ${u.long_dump(d.codes, { hex: true })}
 
       idx++;
     }
-    
-    console.log(`调试: 生成的子表数量: ${this.sgl_subtables.length}`);
   }
 
   toSGL() {
     this.sgl_compile();
-    
-    console.log(`调试: 生成font_unicode数组，子表数量: ${this.sgl_subtables.length}`);
-    
-    if (this.sgl_subtables.length === 0) {
-      console.warn('警告: 没有生成任何子表，font_unicode数组将为空');
-    }
 
     return `
 
