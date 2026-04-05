@@ -4,28 +4,28 @@
       
       <!-- 图片文件输入栏 -->
       <div class="form-section">
-        <label class="form-label">图片文件</label>
-        <div class="file-input-wrapper">
-          <input 
-            v-model="imageFilePath" 
-            type="text" 
-            placeholder="选择图片文件路径"
-            class="form-input path-input"
-            readonly
-          />
-          <button class="file-select-btn" @click="selectImageFile">浏览</button>
-        </div>
+        <button class="add-image-btn" @click="selectImageFile">添加图片</button>
       </div>
 
       <!-- 图片预览框 -->
       <div class="form-section">
         <label class="form-label">图片预览</label>
         <div class="image-preview-container">
-          <div v-if="imagePreviewUrl" class="preview-wrapper">
-            <img :src="imagePreviewUrl" class="preview-image" alt="预览图片">
+          <div v-if="imageFiles.length > 0" class="preview-grid">
+            <div 
+              v-for="(image, index) in imageFiles" 
+              :key="index"
+              class="preview-item"
+            >
+              <img :src="image.previewUrl" class="preview-image" alt="预览图片">
+              <div class="preview-info">
+                <span class="preview-name">{{ image.name }}</span>
+                <button class="remove-image-btn" @click="removeImage(index)" title="删除">×</button>
+              </div>
+            </div>
           </div>
           <div v-else class="preview-placeholder">
-            <span>请点击浏览，选择图片文件</span>
+            <span>请点击添加图片按钮，选择图片文件</span>
           </div>
         </div>
       </div>
@@ -148,8 +148,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 
 // 响应式数据
-const imageFilePath = ref('');
-const imagePreviewUrl = ref('');
+const imageFiles = ref([]);
 const colorFormat = ref('RGB888');
 const outputFormat = ref('c');
 const compression = ref('none');
@@ -167,7 +166,7 @@ const showCopyTip = ref(false);
 
 // 计算属性
 const canConvert = computed(() => {
-  return imageFilePath.value !== '';
+  return imageFiles.value.length > 0;
 });
 
 // 选择图片文件
@@ -175,7 +174,7 @@ async function selectImageFile() {
   try {
     const selected = await open({
       directory: false,
-      multiple: false,
+      multiple: true,
       title: '选择图片文件',
       filters: [
         { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'bmp'] },
@@ -184,32 +183,45 @@ async function selectImageFile() {
     });
     
     if (selected) {
-      imageFilePath.value = selected;
-      addInfoMessage(`已选择图片文件: ${selected}`, 'info');
+      const files = Array.isArray(selected) ? selected : [selected];
       
-      // 生成预览URL
-      try {
-        // 使用后端的read_file_as_base64函数来读取文件
-        const base64Data = await invoke('read_file_as_base64', { path: selected });
+      for (const filePath of files) {
+        addInfoMessage(`已选择图片文件: ${filePath}`, 'info');
         
-        // 将base64数据转换为Blob
-        const binaryString = atob(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+        try {
+          const base64Data = await invoke('read_file_as_base64', { path: filePath });
+          
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: 'image/*' });
+          const url = URL.createObjectURL(blob);
+          
+          imageFiles.value.push({
+            path: filePath,
+            previewUrl: url,
+            name: filePath.split(/[/\\]/).pop() || '未命名'
+          });
+        } catch (previewErr) {
+          console.error('生成预览失败：', previewErr);
+          addInfoMessage(`生成预览失败: ${previewErr.message || JSON.stringify(previewErr)}`, 'error');
         }
-        const blob = new Blob([bytes], { type: 'image/*' });
-        const url = URL.createObjectURL(blob);
-        imagePreviewUrl.value = url;
-      } catch (previewErr) {
-        console.error('生成预览失败：', previewErr);
-        addInfoMessage(`生成预览失败: ${previewErr.message || JSON.stringify(previewErr)}`, 'error');
       }
     }
   } catch (err) {
     console.error('选择图片文件失败：', err);
     addInfoMessage(`选择图片文件失败: ${JSON.stringify(err)}`, 'error');
   }
+}
+
+// 删除图片
+function removeImage(index) {
+  if (imageFiles.value[index] && imageFiles.value[index].previewUrl) {
+    URL.revokeObjectURL(imageFiles.value[index].previewUrl);
+  }
+  imageFiles.value.splice(index, 1);
 }
 
 // 转换图片
@@ -294,6 +306,23 @@ h2 {
   font-size: 14px;
 }
 
+.add-image-btn {
+  width: 100%;
+  padding: 12px 24px;
+  background: #5a86ff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.add-image-btn:hover {
+  background: #4a76e9;
+}
+
 .form-input {
   width: 100%;
   padding: 8px 10px;
@@ -341,29 +370,67 @@ h2 {
 /* 图片预览样式 */
 .image-preview-container {
   width: 100%;
-  height: 200px;
+  min-height: 200px;
+  max-height: 400px;
   border: 1px solid #ddd;
   border-radius: 6px;
-  overflow: hidden;
+  overflow-y: auto;
   background: #f5f5f5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
-.preview-wrapper {
-  width: 100%;
-  height: 100%;
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+
+.preview-item {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  border: 1px solid #ddd;
+  border-radius: 6px;
   background: white;
+  overflow: hidden;
 }
 
-.preview-image {
-  max-width: 100%;
-  max-height: 100%;
+.preview-item .preview-image {
+  width: 100%;
+  height: 120px;
   object-fit: contain;
+  background: #fafafa;
+}
+
+.preview-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: #f5f5f5;
+  border-top: 1px solid #ddd;
+}
+
+.preview-name {
+  font-size: 12px;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.remove-image-btn {
+  background: transparent;
+  border: none;
+  color: #ff4d4f;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.remove-image-btn:hover {
+  color: #ff7875;
 }
 
 .preview-placeholder {
@@ -371,7 +438,7 @@ h2 {
   font-size: 14px;
   text-align: center;
   width: 100%;
-  height: 100%;
+  height: 200px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -665,6 +732,15 @@ html.dark .form-label {
   color: #e0e0e0;
 }
 
+html.dark .add-image-btn {
+  background: #6699ff;
+  color: white;
+}
+
+html.dark .add-image-btn:hover {
+  background: #5588ee;
+}
+
 html.dark .form-input {
   background: #252a3a;
   border-color: #3a3f55;
@@ -691,8 +767,22 @@ html.dark .image-preview-container {
   background: #252a3a;
 }
 
-html.dark .preview-wrapper {
+html.dark .preview-item {
+  border-color: #3a3f55;
   background: #1a1d2b;
+}
+
+html.dark .preview-item .preview-image {
+  background: #252a3a;
+}
+
+html.dark .preview-info {
+  background: #252a3a;
+  border-top-color: #3a3f55;
+}
+
+html.dark .preview-name {
+  color: #e0e0e0;
 }
 
 html.dark .preview-placeholder {
