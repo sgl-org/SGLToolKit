@@ -53,9 +53,9 @@
               <option value="RGB888">RGB888</option>
               <option value="RGB565">RGB565</option>
               <option value="RGB232">RGB232</option>
-              <option value="ARGB888">ARGB888</option>
-              <option value="ARGB444">ARGB444</option>
-              <option value="ARGB222">ARGB222</option>
+              <option value="ARGB8888">ARGB8888</option>
+              <option value="ARGB4444">ARGB4444</option>
+              <option value="ARGB2222">ARGB2222</option>
             </select>
           </div>
           <div class="setting-item">
