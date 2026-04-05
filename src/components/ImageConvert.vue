@@ -128,6 +128,30 @@
       </div>
     </div>
 
+    <!-- 转换结果 -->
+    <div v-if="conversionResults.length > 0" class="result-section">
+      <h4>转换结果</h4>
+      <div class="result-container">
+        <div 
+          v-for="(result, index) in conversionResults" 
+          :key="index"
+          class="result-item"
+        >
+          <div class="result-header">
+            <span class="result-name">{{ result.name }}</span>
+            <button 
+              class="copy-result-btn"
+              @click="copyResult(result.code)"
+              title="复制代码"
+            >
+              复制
+            </button>
+          </div>
+          <pre class="result-code">{{ result.code }}</pre>
+        </div>
+      </div>
+    </div>
+
     <!-- LOG信息栏 -->
     <div class="info-bar">
       <h4>LOG信息</h4>
@@ -177,6 +201,7 @@ const isConverting = ref(false);
 const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
 const showCopyTip = ref(false);
+const conversionResults = ref([]);
 
 // 计算属性
 const canConvert = computed(() => {
@@ -265,21 +290,202 @@ async function convertImage() {
   if (!canConvert.value || isConverting.value) return;
 
   isConverting.value = true;
+  conversionResults.value = [];
 
   try {
-    // 这里添加转换逻辑
     addInfoMessage('开始转换图片...', 'info');
     
-    // 模拟转换过程
-    setTimeout(() => {
-      addInfoMessage('转换成功！', 'info');
-      isConverting.value = false;
-    }, 2000);
+    for (let i = 0; i < imageFiles.value.length; i++) {
+      const image = imageFiles.value[i];
+      addInfoMessage(`正在转换: ${image.name}`, 'info');
+      
+      // 生成C语言数组
+      const cCode = await generateCArray(image, i);
+      conversionResults.value.push({
+        name: image.name,
+        code: cCode
+      });
+    }
+    
+    addInfoMessage('转换成功！', 'info');
+    isConverting.value = false;
 
   } catch (err) {
     console.error('转换失败:', err);
     addInfoMessage(`转换失败：${String(err)}`, 'error');
     isConverting.value = false;
+  }
+}
+
+// 生成C语言数组
+async function generateCArray(image, index) {
+  // 获取图片的实际像素数据
+  const bitmapData = await getImagePixelData(image);
+  const width = image.width || 32;
+  const height = image.height || 32;
+  const bytesPerPixel = getBytesPerPixel(colorFormat.value);
+  const totalBytes = bitmapData.length;
+  
+  // 生成C代码
+  let cCode = `#include <stdint.h>\n`;
+  cCode += `#include <sgl_core.h>\n\n`;
+  
+  // 生成bitmap数组
+  const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
+  const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+  const bitmapName = `${safeFilename}_bitmap`;
+  cCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
+  
+  let line = '    ';
+  for (let i = 0; i < bitmapData.length; i++) {
+    line += `0x${bitmapData[i].toString(16).padStart(2, '0')}`;
+    if (i < bitmapData.length - 1) {
+      line += ', ';
+    }
+    
+    // 每24个字节换行
+    if ((i + 1) % 24 === 0 && i < bitmapData.length - 1) {
+      cCode += line + '\n';
+      line = '    ';
+    }
+  }
+  
+  if (line.trim()) {
+    cCode += line + '\n';
+  }
+  cCode += `};\n\n`;
+  
+  // 生成sgl_pixmap_t结构
+  const pixmapName = arrayName.value || `${safeFilename}_image`;
+  cCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
+  cCode += `    .width = ${width},\n`;
+  cCode += `    .height = ${height},\n`;
+  cCode += `    .bitmap.array = ${bitmapName},\n`;
+  cCode += `    .format = ${getSGLFormat(colorFormat.value)},\n`;
+  cCode += `};\n`;
+  
+  return cCode;
+}
+
+// 获取图片的像素数据
+function getImagePixelData(image) {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+      
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      const bitmapData = [];
+      
+      // 根据颜色格式转换像素数据
+      const format = colorFormat.value;
+      
+      for (let i = 0; i < data.length; i += 4) {
+        let r = data[i];
+        let g = data[i + 1];
+        let b = data[i + 2];
+        const a = data[i + 3];
+        
+        // 处理透明像素
+        if (a < 255 && enableTransparentFill.value) {
+          // 使用透明填充颜色
+          const fillColor = parseColor(transparentFillColor.value);
+          if (fillColor) {
+            r = fillColor.r;
+            g = fillColor.g;
+            b = fillColor.b;
+          }
+        }
+        
+        // 根据颜色格式转换
+        switch (format) {
+          case 'RGB888':
+            bitmapData.push(r, g, b);
+            break;
+          case 'RGB565':
+            // RGB565: 5 bits R, 6 bits G, 5 bits B
+            const rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            bitmapData.push(rgb565 & 0xFF, (rgb565 >> 8) & 0xFF);
+            break;
+          case 'RGB232':
+            // RGB232: 2 bits R, 3 bits G, 2 bits B
+            const rgb232 = ((r >> 6) << 5) | ((g >> 5) << 2) | (b >> 6);
+            bitmapData.push(rgb232);
+            break;
+          case 'ARGB8888':
+            bitmapData.push(a, r, g, b);
+            break;
+          case 'ARGB4444':
+            // ARGB4444: 4 bits each
+            const argb4444 = ((a >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+            bitmapData.push(argb4444 & 0xFF, (argb4444 >> 8) & 0xFF);
+            break;
+          case 'ARGB2222':
+            // ARGB2222: 2 bits each
+            const argb2222 = ((a >> 6) << 6) | ((r >> 6) << 4) | ((g >> 6) << 2) | (b >> 6);
+            bitmapData.push(argb2222);
+            break;
+          default:
+            bitmapData.push(r, g, b);
+        }
+      }
+      
+      resolve(bitmapData);
+    };
+    
+    img.onerror = () => {
+      reject(new Error('无法加载图片'));
+    };
+    
+    img.src = image.previewUrl;
+  });
+}
+
+// 解析颜色值
+function parseColor(color) {
+  // 处理十六进制颜色
+  if (color.startsWith('#')) {
+    const hex = color.slice(1);
+    if (hex.length === 6) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16)
+      };
+    }
+  }
+  return null;
+}
+
+// 获取每个像素的字节数
+function getBytesPerPixel(format) {
+  switch (format) {
+    case 'RGB888': return 3;
+    case 'RGB565': return 2;
+    case 'RGB232': return 1;
+    case 'ARGB8888': return 4;
+    case 'ARGB4444': return 2;
+    case 'ARGB2222': return 1;
+    default: return 3;
+  }
+}
+
+// 获取SGL格式宏
+function getSGLFormat(format) {
+  switch (format) {
+    case 'RGB888': return 'SGL_PIXMAP_FMT_RGB888';
+    case 'RGB565': return 'SGL_PIXMAP_FMT_RGB565';
+    case 'RGB232': return 'SGL_PIXMAP_FMT_RGB232';
+    case 'ARGB8888': return 'SGL_PIXMAP_FMT_ARGB8888';
+    case 'ARGB4444': return 'SGL_PIXMAP_FMT_ARGB4444';
+    case 'ARGB2222': return 'SGL_PIXMAP_FMT_ARGB2222';
+    default: return 'SGL_PIXMAP_FMT_RGB888';
   }
 }
 
@@ -291,6 +497,19 @@ async function copyMessageContent(content) {
     setTimeout(() => showCopyTip.value = false, 1000);
   } catch (err) {
     console.error('复制失败：', err);
+  }
+}
+
+// 复制转换结果
+async function copyResult(code) {
+  try {
+    await navigator.clipboard.writeText(code);
+    showCopyTip.value = true;
+    setTimeout(() => showCopyTip.value = false, 1000);
+    addInfoMessage('代码已复制到剪贴板', 'info');
+  } catch (err) {
+    console.error('复制失败：', err);
+    addInfoMessage('复制失败', 'error');
   }
 }
 
@@ -687,6 +906,79 @@ h2 {
   cursor: not-allowed;
 }
 
+/* 转换结果样式 */
+.result-section {
+  margin-top: 24px;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  transition: all 0.3s ease;
+}
+
+.result-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
+.result-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.result-item {
+  border: 1px solid #eee;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #eee;
+}
+
+.result-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.copy-result-btn {
+  background: transparent;
+  border: 1px solid #5a86ff;
+  color: #5a86ff;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-result-btn:hover {
+  background: #5a86ff;
+  color: white;
+}
+
+.result-code {
+  margin: 0;
+  padding: 12px;
+  background: #fafafa;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
 /* 信息输出栏样式 */
 .info-bar {
   margin-top: 24px;
@@ -950,6 +1242,43 @@ html.dark .misc-item span {
 html.dark .info-bar {
   background: #252a3a;
   border-color: #3a3f55;
+}
+
+html.dark .result-section {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .result-section h4 {
+  color: #e0e0e0;
+}
+
+html.dark .result-item {
+  border-color: #3a3f55;
+}
+
+html.dark .result-header {
+  background: #1a1d2b;
+  border-bottom-color: #3a3f55;
+}
+
+html.dark .result-name {
+  color: #e0e0e0;
+}
+
+html.dark .copy-result-btn {
+  border-color: #6699ff;
+  color: #6699ff;
+}
+
+html.dark .copy-result-btn:hover {
+  background: #6699ff;
+  color: white;
+}
+
+html.dark .result-code {
+  background: #1a1d2b;
+  color: #e0e0e0;
 }
 
 html.dark .info-bar h4 {
