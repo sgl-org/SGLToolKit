@@ -203,7 +203,7 @@ const imageFiles = ref([]);
 const colorFormat = ref('RGB888');
 const outputFormat = ref('c');
 const compression = ref('none');
-const enableTransparentFill = ref(false);
+const enableTransparentFill = ref(true);
 const transparentFillColor = ref('#FFFFFF');
 const arrayName = ref('sgl_image');
 const outputFolder = ref('');
@@ -219,7 +219,8 @@ const conversionResults = ref([]);
 // 加载保存的设置
 function loadSettings() {
   try {
-    // 重置透明填充颜色为白色
+    // 重置透明填充相关设置
+    enableTransparentFill.value = true;
     transparentFillColor.value = '#FFFFFF';
     
     const savedSettings = localStorage.getItem('sgltoolkit-settings');
