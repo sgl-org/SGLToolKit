@@ -9,7 +9,16 @@
 
       <!-- 图片预览框 -->
       <div class="form-section">
-        <label class="form-label">图片预览</label>
+        <div class="form-label-with-button">
+          <label class="form-label">图片预览</label>
+          <button 
+            v-if="imageFiles.length > 0" 
+            class="clear-all-btn" 
+            @click="clearAllImages"
+          >
+            全部清除
+          </button>
+        </div>
         <div class="image-preview-container">
           <div v-if="imageFiles.length > 0" class="preview-grid">
             <div 
@@ -241,6 +250,16 @@ function removeImage(index) {
   imageFiles.value.splice(index, 1);
 }
 
+// 清除所有图片
+function clearAllImages() {
+  for (const image of imageFiles.value) {
+    if (image.previewUrl) {
+      URL.revokeObjectURL(image.previewUrl);
+    }
+  }
+  imageFiles.value = [];
+}
+
 // 转换图片
 async function convertImage() {
   if (!canConvert.value || isConverting.value) return;
@@ -321,6 +340,33 @@ h2 {
   font-weight: 500;
   color: #333;
   font-size: 14px;
+}
+
+.form-label-with-button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.form-label-with-button .form-label {
+  margin-bottom: 0;
+}
+
+.clear-all-btn {
+  background: transparent;
+  border: 1px solid #ff4d4f;
+  color: #ff4d4f;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-all-btn:hover {
+  background: #ff4d4f;
+  color: white;
 }
 
 .add-image-btn {
@@ -765,6 +811,16 @@ html.dark .form-section {
 
 html.dark .form-label {
   color: #e0e0e0;
+}
+
+html.dark .clear-all-btn {
+  border-color: #ff7875;
+  color: #ff7875;
+}
+
+html.dark .clear-all-btn:hover {
+  background: #ff7875;
+  color: white;
 }
 
 html.dark .add-image-btn {
