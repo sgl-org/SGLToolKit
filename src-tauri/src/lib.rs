@@ -34,12 +34,44 @@ async fn read_file_as_base64(path: String) -> Result<String, String> {
     Ok(base64)
 }
 
+#[tauri::command]
+async fn save_file(_filename: String, _content: String) -> std::collections::HashMap<String, String> {
+    let mut result = std::collections::HashMap::new();
+    
+    // 由于Tauri 2.0中api模块已被移除，我们直接返回错误，让前端降级到浏览器下载
+    result.insert("success".to_string(), "false".to_string());
+    result.insert("error".to_string(), "Tauri dialog API not available".to_string());
+    
+    result
+}
+
+#[tauri::command]
+async fn write_file(path: String, content: String) -> std::collections::HashMap<String, String> {
+    use std::fs;
+    
+    let mut result = std::collections::HashMap::new();
+    
+    match fs::write(&path, content) {
+        Ok(_) => {
+            result.insert("success".to_string(), "true".to_string());
+            result.insert("path".to_string(), path);
+        }
+        Err(e) => {
+            result.insert("success".to_string(), "false".to_string());
+            result.insert("error".to_string(), format!("Failed to write file: {}", e));
+        }
+    }
+    
+    result
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, run_shell_command, read_file_as_base64])
+        .plugin(tauri_plugin_fs::init())
+        .invoke_handler(tauri::generate_handler![greet, run_shell_command, read_file_as_base64, save_file, write_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

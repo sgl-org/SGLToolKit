@@ -93,8 +93,11 @@
             <input v-model="arrayName" type="text" class="form-input" placeholder="输入数组名">
           </div>
           <div class="setting-item">
-            <label class="form-label">输出文件名</label>
-            <input v-model="outputFileName" type="text" class="form-input" placeholder="输入输出文件名">
+            <label class="form-label">输出文件夹</label>
+            <div class="file-input-wrapper">
+              <input v-model="outputFolder" type="text" class="form-input path-input" placeholder="选择输出文件夹">
+              <button class="file-select-btn" @click="selectOutputFolder">浏览</button>
+            </div>
           </div>
           <div class="setting-item">
             <label class="form-label">BIN格式起始地址(hex)</label>
@@ -139,13 +142,22 @@
         >
           <div class="result-header">
             <span class="result-name">{{ result.name }}</span>
-            <button 
-              class="copy-result-btn"
-              @click="copyResult(result.code)"
-              title="复制代码"
-            >
-              复制
-            </button>
+            <div class="result-actions">
+              <button 
+                class="copy-result-btn"
+                @click="copyResult(result.code)"
+                title="复制代码"
+              >
+                复制
+              </button>
+              <button 
+                class="download-result-btn"
+                @click="downloadResult(result.code, result.name)"
+                title="下载文件"
+              >
+                下载
+              </button>
+            </div>
           </div>
           <pre class="result-code">{{ result.code }}</pre>
         </div>
@@ -182,7 +194,8 @@
 
 <script setup>
 import { ref, computed, nextTick } from 'vue';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 
 // 响应式数据
@@ -193,7 +206,7 @@ const compression = ref('none');
 const enableTransparentFill = ref(false);
 const transparentFillColor = ref('#000000');
 const arrayName = ref('');
-const outputFileName = ref('');
+const outputFolder = ref('');
 const binStartAddress = ref('0x0000');
 const combineAsArray = ref(false);
 const swapBytes = ref(false);
@@ -264,6 +277,26 @@ async function selectImageFile() {
   } catch (err) {
     console.error('选择图片文件失败：', err);
     addInfoMessage(`选择图片文件失败: ${JSON.stringify(err)}`, 'error');
+  }
+}
+
+// 选择输出文件夹
+async function selectOutputFolder() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择输出文件夹'
+    });
+    
+    if (selected) {
+      const folderPath = Array.isArray(selected) ? selected[0] : selected;
+      outputFolder.value = folderPath;
+      addInfoMessage(`已选择输出文件夹: ${folderPath}`, 'info');
+    }
+  } catch (err) {
+    console.error('选择输出文件夹失败：', err);
+    addInfoMessage(`选择输出文件夹失败: ${JSON.stringify(err)}`, 'error');
   }
 }
 
@@ -510,6 +543,67 @@ async function copyResult(code) {
   } catch (err) {
     console.error('复制失败：', err);
     addInfoMessage('复制失败', 'error');
+  }
+}
+
+// 下载转换结果
+async function downloadResult(code, filename) {
+  try {
+    // 去除文件后缀
+    const filenameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+    const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+    const defaultFileName = `${safeFilename}.c`;
+    
+    console.log('开始下载，文件名:', defaultFileName);
+    
+    // 检查是否存在输出文件夹
+    if (!outputFolder.value) {
+      console.error('未选择输出文件夹');
+      addInfoMessage('请先选择输出文件夹', 'error');
+      return;
+    }
+    
+    console.log('使用用户选择的输出文件夹:', outputFolder.value);
+    
+    // 构建完整的文件路径
+    const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
+    const filePath = outputFolder.value + separator + defaultFileName;
+    console.log('构建的文件路径:', filePath);
+    
+    // 尝试使用Tauri的invoke API来调用自定义的Rust命令
+    try {
+      console.log('尝试导入invoke API');
+      const { invoke } = await import('@tauri-apps/api/core');
+      console.log('invoke API导入成功');
+      
+      console.log('调用write_file命令');
+      const result = await invoke('write_file', {
+        path: filePath,
+        content: code
+      });
+      
+      console.log('write_file命令返回:', result);
+      
+      if (result.success) {
+        console.log('文件保存成功');
+        addInfoMessage(`文件已保存：${result.path}`, 'info');
+      } else {
+        console.log('文件保存失败');
+        addInfoMessage(`文件保存失败：${result.error}`, 'error');
+      }
+    } catch (invokeError) {
+      console.error('Invoke操作失败：', invokeError);
+      console.error('错误名称:', invokeError.name);
+      console.error('错误消息:', invokeError.message);
+      console.error('错误堆栈:', invokeError.stack);
+      addInfoMessage(`文件写入失败：${invokeError.message || '未知错误'}`, 'error');
+    }
+  } catch (err) {
+    console.error('下载失败：', err);
+    console.error('错误名称:', err.name);
+    console.error('错误消息:', err.message);
+    console.error('错误堆栈:', err.stack);
+    addInfoMessage(`下载失败：${err.message || '未知错误'}`, 'error');
   }
 }
 
@@ -944,6 +1038,11 @@ h2 {
   border-bottom: 1px solid #eee;
 }
 
+.result-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .result-name {
   font-size: 13px;
   font-weight: 500;
@@ -962,6 +1061,22 @@ h2 {
 }
 
 .copy-result-btn:hover {
+  background: #5a86ff;
+  color: white;
+}
+
+.download-result-btn {
+  background: transparent;
+  border: 1px solid #5a86ff;
+  color: #5a86ff;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.download-result-btn:hover {
   background: #5a86ff;
   color: white;
 }
@@ -1272,6 +1387,16 @@ html.dark .copy-result-btn {
 }
 
 html.dark .copy-result-btn:hover {
+  background: #6699ff;
+  color: white;
+}
+
+html.dark .download-result-btn {
+  border-color: #6699ff;
+  color: #6699ff;
+}
+
+html.dark .download-result-btn:hover {
   background: #6699ff;
   color: white;
 }
