@@ -51,11 +51,11 @@
             <label class="form-label">颜色格式</label>
             <select v-model="colorFormat" class="form-select">
               <option value="RGB888">RGB888</option>
-              <option value="RGB565">RGB565</option>
-              <option value="RGB232">RGB232</option>
-              <option value="ARGB8888">ARGB8888</option>
-              <option value="ARGB4444">ARGB4444</option>
-              <option value="ARGB2222">ARGB2222</option>
+          <option value="RGB565">RGB565</option>
+          <option value="RGB332">RGB332</option>
+          <option value="ARGB8888">ARGB8888</option>
+          <option value="ARGB4444">ARGB4444</option>
+          <option value="ARGB2222">ARGB2222</option>
             </select>
           </div>
           <div class="setting-item">
@@ -430,6 +430,12 @@ async function generateCArray(image, index) {
   const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
   const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
   const bitmapName = `${safeFilename}_bitmap`;
+  
+  // 添加压缩算法注释
+  if (compression.value === 'rle') {
+    cCode += `// RLE压缩数据\n`;
+  }
+  
   cCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
   
   let line = '    ';
@@ -457,7 +463,7 @@ async function generateCArray(image, index) {
   cCode += `    .width = ${width},\n`;
   cCode += `    .height = ${height},\n`;
   cCode += `    .bitmap.array = ${bitmapName},\n`;
-  cCode += `    .format = ${getSGLFormat(colorFormat.value)},\n`;
+  cCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
   cCode += `};\n`;
   
   return cCode;
@@ -494,6 +500,11 @@ async function generateCombinedArray() {
       bitmapName: bitmapName
     });
     
+    // 添加压缩算法注释
+    if (compression.value === 'rle') {
+      cCode += `// RLE压缩数据\n`;
+    }
+    
     cCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
     
     let line = '    ';
@@ -529,7 +540,7 @@ async function generateCombinedArray() {
     cCode += `        .width = ${info.width},\n`;
     cCode += `        .height = ${info.height},\n`;
     cCode += `        .bitmap.array = ${info.bitmapName},\n`;
-    cCode += `        .format = ${getSGLFormat(colorFormat.value)}\n`;
+    cCode += `        .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
     cCode += `    }`;
     
     if (i < pixmapInfos.length - 1) {
@@ -582,20 +593,22 @@ function getImagePixelData(image) {
         // 根据颜色格式转换
         switch (format) {
           case 'RGB888':
-            bitmapData.push(r, g, b);
+            // RGB888: 按 B, G, R 顺序（小端序）
+            bitmapData.push(b, g, r);
             break;
           case 'RGB565':
-            // RGB565: 5 bits R, 6 bits G, 5 bits B
+            // RGB565: 5 bits R, 6 bits G, 5 bits B（小端序）
             const rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
             bitmapData.push(rgb565 & 0xFF, (rgb565 >> 8) & 0xFF);
             break;
-          case 'RGB232':
-            // RGB232: 2 bits R, 3 bits G, 2 bits B
-            const rgb232 = ((r >> 6) << 5) | ((g >> 5) << 2) | (b >> 6);
-            bitmapData.push(rgb232);
+          case 'RGB332':
+            // RGB332: 3 bits R, 3 bits G, 2 bits B
+            const rgb332 = ((r >> 5) << 5) | ((g >> 5) << 2) | (b >> 6);
+            bitmapData.push(rgb332);
             break;
           case 'ARGB8888':
-            bitmapData.push(a, r, g, b);
+            // ARGB8888: 按 B, G, R, A 顺序（小端序）
+            bitmapData.push(b, g, r, a);
             break;
           case 'ARGB4444':
             // ARGB4444: 4 bits each
@@ -612,7 +625,13 @@ function getImagePixelData(image) {
         }
       }
       
-      resolve(bitmapData);
+      // 应用压缩算法
+      if (compression.value === 'rle') {
+        const compressedData = rleCompress(bitmapData, format);
+        resolve(compressedData);
+      } else {
+        resolve(bitmapData);
+      }
     };
     
     img.onerror = () => {
@@ -639,12 +658,106 @@ function parseColor(color) {
   return null;
 }
 
+// RLE压缩算法
+function rleCompress(data, format) {
+  if (data.length === 0) return [];
+  
+  const compressed = [];
+  
+  // 根据颜色格式确定压缩单位
+  const bytesPerPixel = getBytesPerPixel(format);
+  
+  if (bytesPerPixel === 1) {
+    // 单字节格式：RGB332, ARGB2222
+    let count = 1;
+    let current = data[0];
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i] === current && count < 255) {
+        count++;
+      } else {
+        compressed.push(count, current);
+        current = data[i];
+        count = 1;
+      }
+    }
+    
+    // 添加最后一组
+    compressed.push(count, current);
+  } else if (bytesPerPixel === 2) {
+    // 双字节格式：RGB565, ARGB4444
+    let count = 1;
+    let current1 = data[0];
+    let current2 = data[1];
+    
+    for (let i = 2; i < data.length; i += 2) {
+      if (data[i] === current1 && data[i + 1] === current2 && count < 255) {
+        count++;
+      } else {
+        compressed.push(count, current1, current2);
+        current1 = data[i];
+        current2 = data[i + 1];
+        count = 1;
+      }
+    }
+    
+    // 添加最后一组
+    compressed.push(count, current1, current2);
+  } else if (bytesPerPixel === 3) {
+    // 三字节格式：RGB888
+    let count = 1;
+    let current1 = data[0];
+    let current2 = data[1];
+    let current3 = data[2];
+    
+    for (let i = 3; i < data.length; i += 3) {
+      if (data[i] === current1 && data[i + 1] === current2 && data[i + 2] === current3 && count < 255) {
+        count++;
+      } else {
+        compressed.push(count, current1, current2, current3);
+        current1 = data[i];
+        current2 = data[i + 1];
+        current3 = data[i + 2];
+        count = 1;
+      }
+    }
+    
+    // 添加最后一组
+    compressed.push(count, current1, current2, current3);
+  } else if (bytesPerPixel === 4) {
+    // 四字节格式：ARGB8888
+    let count = 1;
+    let current1 = data[0];
+    let current2 = data[1];
+    let current3 = data[2];
+    let current4 = data[3];
+    
+    for (let i = 4; i < data.length; i += 4) {
+      if (data[i] === current1 && data[i + 1] === current2 && data[i + 2] === current3 && data[i + 3] === current4 && count < 255) {
+        count++;
+      } else {
+        compressed.push(count, current1, current2, current3, current4);
+        current1 = data[i];
+        current2 = data[i + 1];
+        current3 = data[i + 2];
+        current4 = data[i + 3];
+        count = 1;
+      }
+    }
+    
+    // 添加最后一组
+    compressed.push(count, current1, current2, current3, current4);
+  }
+  
+  return compressed;
+}
+
 // 获取每个像素的字节数
 function getBytesPerPixel(format) {
   switch (format) {
     case 'RGB888': return 3;
     case 'RGB565': return 2;
-    case 'RGB232': return 1;
+    case 'RGB332': return 1;
     case 'ARGB8888': return 4;
     case 'ARGB4444': return 2;
     case 'ARGB2222': return 1;
@@ -653,15 +766,27 @@ function getBytesPerPixel(format) {
 }
 
 // 获取SGL格式宏
-function getSGLFormat(format) {
-  switch (format) {
-    case 'RGB888': return 'SGL_PIXMAP_FMT_RGB888';
-    case 'RGB565': return 'SGL_PIXMAP_FMT_RGB565';
-    case 'RGB232': return 'SGL_PIXMAP_FMT_RGB232';
-    case 'ARGB8888': return 'SGL_PIXMAP_FMT_ARGB8888';
-    case 'ARGB4444': return 'SGL_PIXMAP_FMT_ARGB4444';
-    case 'ARGB2222': return 'SGL_PIXMAP_FMT_ARGB2222';
-    default: return 'SGL_PIXMAP_FMT_RGB888';
+function getSGLFormat(format, compression) {
+  if (compression === 'rle') {
+    switch (format) {
+      case 'RGB888': return 'SGL_PIXMAP_FMT_RLE_RGB888';
+      case 'RGB565': return 'SGL_PIXMAP_FMT_RLE_RGB565';
+      case 'RGB332': return 'SGL_PIXMAP_FMT_RLE_RGB332';
+      case 'ARGB8888': return 'SGL_PIXMAP_FMT_RLE_ARGB8888';
+      case 'ARGB4444': return 'SGL_PIXMAP_FMT_RLE_ARGB4444';
+      case 'ARGB2222': return 'SGL_PIXMAP_FMT_RLE_ARGB2222';
+      default: return 'SGL_PIXMAP_FMT_RLE_RGB888';
+    }
+  } else {
+    switch (format) {
+      case 'RGB888': return 'SGL_PIXMAP_FMT_RGB888';
+      case 'RGB565': return 'SGL_PIXMAP_FMT_RGB565';
+      case 'RGB332': return 'SGL_PIXMAP_FMT_RGB332';
+      case 'ARGB8888': return 'SGL_PIXMAP_FMT_ARGB8888';
+      case 'ARGB4444': return 'SGL_PIXMAP_FMT_ARGB4444';
+      case 'ARGB2222': return 'SGL_PIXMAP_FMT_ARGB2222';
+      default: return 'SGL_PIXMAP_FMT_RGB888';
+    }
   }
 }
 
