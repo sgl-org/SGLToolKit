@@ -193,7 +193,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, watch } from 'vue';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
@@ -215,6 +215,57 @@ const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
 const showCopyTip = ref(false);
 const conversionResults = ref([]);
+
+// 加载保存的设置
+function loadSettings() {
+  try {
+    const savedSettings = localStorage.getItem('sgltoolkit-settings');
+    if (savedSettings) {
+      const settings = JSON.parse(savedSettings);
+      if (settings.colorFormat) colorFormat.value = settings.colorFormat;
+      if (settings.outputFormat) outputFormat.value = settings.outputFormat;
+      if (settings.compression) compression.value = settings.compression;
+      if (settings.enableTransparentFill !== undefined) enableTransparentFill.value = settings.enableTransparentFill;
+      if (settings.transparentFillColor) transparentFillColor.value = settings.transparentFillColor;
+      if (settings.arrayName) arrayName.value = settings.arrayName;
+      if (settings.outputFolder) outputFolder.value = settings.outputFolder;
+      if (settings.binStartAddress) binStartAddress.value = settings.binStartAddress;
+      if (settings.combineAsArray !== undefined) combineAsArray.value = settings.combineAsArray;
+      if (settings.swapBytes !== undefined) swapBytes.value = settings.swapBytes;
+    }
+  } catch (error) {
+    console.error('加载设置失败:', error);
+  }
+}
+
+// 保存设置
+function saveSettings() {
+  try {
+    const settings = {
+      colorFormat: colorFormat.value,
+      outputFormat: outputFormat.value,
+      compression: compression.value,
+      enableTransparentFill: enableTransparentFill.value,
+      transparentFillColor: transparentFillColor.value,
+      arrayName: arrayName.value,
+      outputFolder: outputFolder.value,
+      binStartAddress: binStartAddress.value,
+      combineAsArray: combineAsArray.value,
+      swapBytes: swapBytes.value
+    };
+    localStorage.setItem('sgltoolkit-settings', JSON.stringify(settings));
+  } catch (error) {
+    console.error('保存设置失败:', error);
+  }
+}
+
+// 监听设置变化
+watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes], () => {
+  saveSettings();
+}, { deep: true });
+
+// 初始化时加载设置
+loadSettings();
 
 // 计算属性
 const canConvert = computed(() => {
