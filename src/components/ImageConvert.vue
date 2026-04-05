@@ -205,10 +205,10 @@ const outputFormat = ref('c');
 const compression = ref('none');
 const enableTransparentFill = ref(false);
 const transparentFillColor = ref('#000000');
-const arrayName = ref('');
+const arrayName = ref('sgl_image');
 const outputFolder = ref('');
 const binStartAddress = ref('0x0000');
-const combineAsArray = ref(false);
+const combineAsArray = ref(true);
 const swapBytes = ref(false);
 const isConverting = ref(false);
 const infoMessages = ref([]);
@@ -328,16 +328,26 @@ async function convertImage() {
   try {
     addInfoMessage('开始转换图片...', 'info');
     
-    for (let i = 0; i < imageFiles.value.length; i++) {
-      const image = imageFiles.value[i];
-      addInfoMessage(`正在转换: ${image.name}`, 'info');
-      
-      // 生成C语言数组
-      const cCode = await generateCArray(image, i);
+    if (combineAsArray.value && imageFiles.value.length > 1) {
+      // 生成组合数组
+      const combinedCode = await generateCombinedArray();
       conversionResults.value.push({
-        name: image.name,
-        code: cCode
+        name: 'combined_array',
+        code: combinedCode
       });
+    } else {
+      // 为每张图片生成单独的代码
+      for (let i = 0; i < imageFiles.value.length; i++) {
+        const image = imageFiles.value[i];
+        addInfoMessage(`正在转换: ${image.name}`, 'info');
+        
+        // 生成C语言数组
+        const cCode = await generateCArray(image, i);
+        conversionResults.value.push({
+          name: image.name,
+          code: cCode
+        });
+      }
     }
     
     addInfoMessage('转换成功！', 'info');
@@ -395,6 +405,86 @@ async function generateCArray(image, index) {
   cCode += `    .height = ${height},\n`;
   cCode += `    .bitmap.array = ${bitmapName},\n`;
   cCode += `    .format = ${getSGLFormat(colorFormat.value)},\n`;
+  cCode += `};\n`;
+  
+  return cCode;
+}
+
+// 生成组合数组
+async function generateCombinedArray() {
+  // 生成C代码
+  let cCode = `#include <stdint.h>\n`;
+  cCode += `#include <sgl_core.h>\n\n`;
+  
+  // 为每张图片生成bitmap数组
+  const bitmapNames = [];
+  const pixmapInfos = [];
+  
+  for (let i = 0; i < imageFiles.value.length; i++) {
+    const image = imageFiles.value[i];
+    
+    // 获取图片的实际像素数据
+    const bitmapData = await getImagePixelData(image);
+    const width = image.width || 32;
+    const height = image.height || 32;
+    const totalBytes = bitmapData.length;
+    
+    // 生成bitmap数组
+    const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
+    const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+    const bitmapName = `${safeFilename}_bitmap`;
+    bitmapNames.push(bitmapName);
+    
+    pixmapInfos.push({
+      width: width,
+      height: height,
+      bitmapName: bitmapName
+    });
+    
+    cCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
+    
+    let line = '    ';
+    for (let j = 0; j < bitmapData.length; j++) {
+      line += `0x${bitmapData[j].toString(16).padStart(2, '0')}`;
+      if (j < bitmapData.length - 1) {
+        line += ', ';
+      }
+      
+      // 每24个字节换行
+      if ((j + 1) % 24 === 0 && j < bitmapData.length - 1) {
+        cCode += line + '\n';
+        line = '    ';
+      }
+    }
+    
+    if (line.trim()) {
+      cCode += line + '\n';
+    }
+    cCode += `};\n\n`;
+  }
+  
+  // 生成组合数组
+  const arrayNameValue = arrayName.value || 'combined_images';
+  const imageCount = imageFiles.value.length;
+  
+  cCode += `const sgl_pixmap_t ${arrayNameValue}[${imageCount}] = {\n`;
+  
+  for (let i = 0; i < pixmapInfos.length; i++) {
+    const info = pixmapInfos[i];
+    
+    cCode += `    {\n`;
+    cCode += `        .width = ${info.width},\n`;
+    cCode += `        .height = ${info.height},\n`;
+    cCode += `        .bitmap.array = ${info.bitmapName},\n`;
+    cCode += `        .format = ${getSGLFormat(colorFormat.value)}\n`;
+    cCode += `    }`;
+    
+    if (i < pixmapInfos.length - 1) {
+      cCode += ',';
+    }
+    cCode += '\n';
+  }
+  
   cCode += `};\n`;
   
   return cCode;
