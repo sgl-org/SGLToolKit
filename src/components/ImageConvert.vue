@@ -382,8 +382,10 @@ async function convertImage() {
     if (combineAsArray.value && imageFiles.value.length > 1) {
       // 生成组合数组
       const combinedCode = await generateCombinedArray();
+      // 使用数组名输入框的值作为结果名称
+      const resultName = arrayName.value || 'combined_array';
       conversionResults.value.push({
-        name: 'combined_array',
+        name: resultName,
         code: combinedCode
       });
     } else {
