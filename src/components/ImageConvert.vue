@@ -28,7 +28,12 @@
             >
               <div class="preview-image-wrapper">
                 <img :src="image.previewUrl" class="preview-image" alt="预览图片">
-                <div class="preview-resolution-overlay" v-if="image.width && image.height">
+                <div 
+                  class="preview-resolution-overlay" 
+                  v-if="image.width && image.height"
+                  @dblclick="editResolution(index)"
+                  title="双击编辑分辨率"
+                >
                   {{ image.width }} × {{ image.height }}
                 </div>
               </div>
@@ -796,9 +801,18 @@ function getImagePixelData(image) {
     const img = new Image();
     
     img.onload = () => {
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      ctx.drawImage(img, 0, 0);
+      // 获取目标宽度和高度
+      const targetWidth = image.width || img.naturalWidth;
+      const targetHeight = image.height || img.naturalHeight;
+      
+      // 设置画布大小为目标大小
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      
+      // 使用双线性插值算法进行缩放
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
       
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
@@ -1041,6 +1055,34 @@ function formatBytes(bytes) {
   const sizes = ['B', 'KB', 'MB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 编辑分辨率
+function editResolution(index) {
+  const image = imageFiles.value[index];
+  const currentWidth = image.width || 32;
+  const currentHeight = image.height || 32;
+  
+  const newResolution = prompt(`请输入新的分辨率 (格式: 宽度×高度)`, `${currentWidth}×${currentHeight}`);
+  
+  if (newResolution) {
+    const match = newResolution.match(/^(\d+)\s*[×x]\s*(\d+)$/);
+    if (match) {
+      const newWidth = parseInt(match[1]);
+      const newHeight = parseInt(match[2]);
+      
+      if (newWidth > 0 && newHeight > 0) {
+        // 更新图片分辨率
+        imageFiles.value[index].width = newWidth;
+        imageFiles.value[index].height = newHeight;
+        addInfoMessage(`已更新图片 ${image.name} 的分辨率为 ${newWidth}×${newHeight}`, 'info');
+      } else {
+        addInfoMessage('分辨率必须大于0', 'error');
+      }
+    } else {
+      addInfoMessage('分辨率格式错误，请使用 宽度×高度 的格式', 'error');
+    }
+  }
 }
 
 // 复制消息内容
