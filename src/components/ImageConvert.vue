@@ -842,7 +842,7 @@ function getImagePixelData(image) {
       canvas.width = targetWidth;
       canvas.height = targetHeight;
       
-      // 使用双线性插值算法进行缩放
+      // 使用双三次插值算法进行缩放
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
