@@ -28,13 +28,41 @@
             >
               <div class="preview-image-wrapper">
                 <img :src="image.previewUrl" class="preview-image" alt="预览图片">
-                <div 
-                  class="preview-resolution-overlay" 
-                  v-if="image.width && image.height"
-                  @dblclick="editResolution(index)"
-                  title="双击编辑分辨率"
-                >
-                  {{ image.width }} × {{ image.height }}
+                <div class="preview-resolution-overlay" v-if="image.width && image.height">
+                  <div class="resolution-editor" v-if="editingResolutionIndex !== index">
+                    <span class="resolution-width" @dblclick="startEditingResolution(index, 'width')">{{ image.width }}</span>
+                    <span class="resolution-separator">×</span>
+                    <span class="resolution-height" @dblclick="startEditingResolution(index, 'height')">{{ image.height }}</span>
+                  </div>
+                  <div class="resolution-input" v-else>
+                    <input 
+                      v-if="editingResolutionField === 'width'" 
+                      type="number" 
+                      :value="image.width" 
+                      @input="updateResolution(index, 'width', $event.target.value)"
+                      @blur="stopEditingResolution"
+                      @keydown.enter="stopEditingResolution"
+                      @keydown.escape="stopEditingResolution"
+                      class="resolution-input-field"
+                      min="1"
+                      ref="resolutionInput"
+                    />
+                    <span v-else>{{ image.width }}</span>
+                    <span class="resolution-separator">×</span>
+                    <input 
+                      v-if="editingResolutionField === 'height'" 
+                      type="number" 
+                      :value="image.height" 
+                      @input="updateResolution(index, 'height', $event.target.value)"
+                      @blur="stopEditingResolution"
+                      @keydown.enter="stopEditingResolution"
+                      @keydown.escape="stopEditingResolution"
+                      class="resolution-input-field"
+                      min="1"
+                      ref="resolutionInput"
+                    />
+                    <span v-else>{{ image.height }}</span>
+                  </div>
                 </div>
               </div>
               <div class="preview-info">
@@ -246,6 +274,11 @@ const infoMessagesRef = ref(null);
 const showCopyTip = ref(false);
 const conversionResults = ref([]);
 const conversionPreviews = ref([]);
+
+// 分辨率编辑相关
+const editingResolutionIndex = ref(-1);
+const editingResolutionField = ref('');
+const resolutionInput = ref(null);
 
 // 加载保存的设置
 function loadSettings() {
@@ -1057,31 +1090,31 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// 编辑分辨率
-function editResolution(index) {
-  const image = imageFiles.value[index];
-  const currentWidth = image.width || 32;
-  const currentHeight = image.height || 32;
+// 开始编辑分辨率
+function startEditingResolution(index, field) {
+  editingResolutionIndex.value = index;
+  editingResolutionField.value = field;
   
-  const newResolution = prompt(`请输入新的分辨率 (格式: 宽度×高度)`, `${currentWidth}×${currentHeight}`);
-  
-  if (newResolution) {
-    const match = newResolution.match(/^(\d+)\s*[×x]\s*(\d+)$/);
-    if (match) {
-      const newWidth = parseInt(match[1]);
-      const newHeight = parseInt(match[2]);
-      
-      if (newWidth > 0 && newHeight > 0) {
-        // 更新图片分辨率
-        imageFiles.value[index].width = newWidth;
-        imageFiles.value[index].height = newHeight;
-        addInfoMessage(`已更新图片 ${image.name} 的分辨率为 ${newWidth}×${newHeight}`, 'info');
-      } else {
-        addInfoMessage('分辨率必须大于0', 'error');
-      }
-    } else {
-      addInfoMessage('分辨率格式错误，请使用 宽度×高度 的格式', 'error');
+  // 等待DOM更新后聚焦输入框
+  setTimeout(() => {
+    if (resolutionInput.value) {
+      resolutionInput.value.focus();
+      resolutionInput.value.select();
     }
+  }, 100);
+}
+
+// 停止编辑分辨率
+function stopEditingResolution() {
+  editingResolutionIndex.value = -1;
+  editingResolutionField.value = '';
+}
+
+// 更新分辨率
+function updateResolution(index, field, value) {
+  const numValue = parseInt(value);
+  if (!isNaN(numValue) && numValue > 0) {
+    imageFiles.value[index][field] = numValue;
   }
 }
 
@@ -1382,6 +1415,54 @@ h2 {
   font-size: 11px;
   padding: 2px 6px;
   text-align: center;
+}
+
+.resolution-editor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.resolution-width,
+.resolution-height {
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 2px;
+  transition: background-color 0.2s;
+}
+
+.resolution-width:hover,
+.resolution-height:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.resolution-separator {
+  color: white;
+}
+
+.resolution-input {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.resolution-input-field {
+  width: 40px;
+  font-size: 10px;
+  padding: 1px 2px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  text-align: center;
+  background-color: white;
+  color: #333;
+}
+
+.resolution-input-field:focus {
+  outline: none;
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
 }
 
 .preview-info {
