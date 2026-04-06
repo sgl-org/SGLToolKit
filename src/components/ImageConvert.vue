@@ -436,6 +436,16 @@ function clearAllImages() {
     }
   }
   imageFiles.value = [];
+  // 清除预览数据
+  conversionPreviews.value = [];
+  // 清除转换结果
+  conversionResults.value = [];
+  // 清空缓存
+  imageDataCache.clear();
+  // 释放所有内存缓冲区
+  freeAllMemoryBuffers();
+  // 清空画布池
+  canvasPool.canvases = [];
 }
 
 // 生成转换后预览
