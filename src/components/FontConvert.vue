@@ -28,11 +28,11 @@
             />
           </div>
           <div class="setting-item">
-            <label class="setting-label">位深度</label>
+            <label class="setting-label">抗锯齿级别</label>
             <select v-model.number="bpp" class="form-select setting-select">
-              <option :value="1">1位</option>
-              <option :value="2">2位</option>
-              <option :value="4">4位</option>
+              <option :value="1">1bpp</option>
+              <option :value="2">2bpp</option>
+              <option :value="4">4bpp</option>
             </select>
           </div>
           <div class="setting-item">
