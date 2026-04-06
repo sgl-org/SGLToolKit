@@ -33,8 +33,11 @@
                 </div>
               </div>
               <div class="preview-info">
-                <span class="preview-name">{{ image.name }}</span>
-                <button class="remove-image-btn" @click="removeImage(index)" title="删除">×</button>
+                <div class="preview-info-row">
+                  <span class="preview-name">{{ image.name }}</span>
+                  <button class="remove-image-btn" @click="removeImage(index)" title="删除">×</button>
+                </div>
+                <span class="preview-size" v-if="image.width && image.height">{{ formatBytes(calculateImageSize(image)) }}</span>
               </div>
             </div>
           </div>
@@ -144,6 +147,8 @@
               </div>
               <div class="preview-info">
                 <span class="preview-name">{{ preview.name }}</span>
+                <span class="preview-size">{{ formatBytes(preview.compressedSize) }}</span>
+                <span class="preview-compression" v-if="preview.compressionRatio > 0">压缩率: {{ preview.compressionRatio }}%</span>
               </div>
             </div>
           </div>
@@ -572,11 +577,19 @@ async function generatePreview(image) {
       ctx.putImageData(imageData, 0, 0);
       const previewUrl = canvas.toDataURL('image/png');
       
+      // 计算字节大小和压缩率
+      const originalSize = width * height * bytesPerPixel;
+      const compressedSize = bitmapData.length;
+      const compressionRatio = originalSize > 0 ? ((originalSize - compressedSize) / originalSize * 100).toFixed(1) : 0;
+      
       resolve({
         name: image.name,
         url: previewUrl,
         width: width,
-        height: height
+        height: height,
+        originalSize: originalSize,
+        compressedSize: compressedSize,
+        compressionRatio: compressionRatio
       });
     }).catch(err => {
       reject(err);
@@ -1014,6 +1027,22 @@ function getSGLFormat(format, compression) {
   }
 }
 
+// 计算图片字节大小
+function calculateImageSize(image) {
+  if (!image.width || !image.height) return 0;
+  const bytesPerPixel = getBytesPerPixel(colorFormat.value);
+  return image.width * image.height * bytesPerPixel;
+}
+
+// 格式化字节大小
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // 复制消息内容
 async function copyMessageContent(content) {
   try {
@@ -1315,11 +1344,19 @@ h2 {
 
 .preview-info {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
   padding: 6px 8px;
   background: #f5f5f5;
   border-top: 1px solid #ddd;
+}
+
+.preview-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 2px;
 }
 
 .preview-name {
@@ -1329,6 +1366,18 @@ h2 {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+}
+
+.preview-size {
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.preview-compression {
+  font-size: 11px;
+  color: #52c41a;
+  margin-top: 2px;
 }
 
 .remove-image-btn {
