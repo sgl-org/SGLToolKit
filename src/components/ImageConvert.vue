@@ -251,7 +251,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue';
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
@@ -1109,6 +1109,28 @@ function stopEditingResolution() {
   editingResolutionIndex.value = -1;
   editingResolutionField.value = '';
 }
+
+// 全局点击事件处理函数
+function handleGlobalClick(event) {
+  // 检查点击的元素是否是分辨率编辑相关的元素
+  const target = event.target;
+  if (
+    !target.closest('.preview-resolution-overlay') &&
+    !target.closest('.resolution-input-field')
+  ) {
+    stopEditingResolution();
+  }
+}
+
+// 组件挂载时添加全局点击事件监听器
+onMounted(() => {
+  document.addEventListener('click', handleGlobalClick);
+});
+
+// 组件卸载时移除全局点击事件监听器
+onUnmounted(() => {
+  document.removeEventListener('click', handleGlobalClick);
+});
 
 // 更新分辨率
 function updateResolution(index, field, value) {
