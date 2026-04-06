@@ -10,7 +10,7 @@
       <!-- 图片预览框 -->
       <div class="form-section">
         <div class="form-label-with-button">
-          <label class="form-label">图片预览</label>
+          <label class="form-label">图片预览 (双击分辨率可编辑大小)</label>
           <button 
             v-if="imageFiles.length > 0" 
             class="clear-all-btn" 
