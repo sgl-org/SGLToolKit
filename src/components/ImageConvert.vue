@@ -137,7 +137,7 @@
           </div>
           <div class="setting-item">
             <label class="form-label">BIN格式起始地址(hex)</label>
-            <input v-model="binStartAddress" type="text" class="form-input" placeholder="0x0000">
+            <input v-model="binStartAddress" type="text" class="form-input" placeholder="0x0000" :disabled="outputFormat !== 'bin'">
           </div>
           <div class="setting-item">
             <label class="form-label">杂项</label>
