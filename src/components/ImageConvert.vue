@@ -267,6 +267,28 @@ const arrayName = ref('sgl_image');
 const outputFolder = ref('');
 const binStartAddress = ref('0x0000');
 const combineAsArray = ref(true);
+
+// 监听binStartAddress变化，自动添加0x前缀并验证是否为合法十六进制
+watch(binStartAddress, (newValue) => {
+  let trimmedValue = newValue.trim();
+  
+  // 确保以0x开头
+  if (trimmedValue && !trimmedValue.startsWith('0x')) {
+    trimmedValue = '0x' + trimmedValue;
+  }
+  
+  // 清理非法字符，只保留0-9, A-F, a-f
+  if (trimmedValue) {
+    // 保留0x前缀，只清理后面的部分
+    const prefix = '0x';
+    const hexPart = trimmedValue.substring(2);
+    const cleanedHexPart = hexPart.replace(/[^0-9A-Fa-f]/g, '');
+    trimmedValue = prefix + cleanedHexPart;
+  }
+  
+  // 更新输入值
+  binStartAddress.value = trimmedValue;
+});
 const swapBytes = ref(false);
 const isConverting = ref(false);
 const infoMessages = ref([]);
@@ -730,22 +752,63 @@ async function convertImage() {
       let binCode = `#include <stdint.h>\n`;
       binCode += `#include <sgl_core.h>\n\n`;
       
-      // 获取用户指定的起始地址偏移
-      const startAddress = parseInt(binStartAddress.value, 16) || 0;
+      // 获取用户指定的起始地址偏移，自动添加0x前缀并验证
+      let addressValue = binStartAddress.value.trim();
+      if (addressValue && !addressValue.startsWith('0x')) {
+        addressValue = '0x' + addressValue;
+      }
+      
+      // 验证是否为合法的十六进制值
+      let startAddress = 0;
+      const hexPattern = /^0x[0-9A-Fa-f]+$/;
+      if (addressValue && hexPattern.test(addressValue)) {
+        startAddress = parseInt(addressValue, 16);
+      } else if (addressValue) {
+        // 非法十六进制值，使用默认值0并显示错误信息
+        addInfoMessage('BIN格式起始地址格式错误，已使用默认值0', 'error');
+        startAddress = 0;
+      }
       let currentAddress = startAddress;
       
-      // 生成每个图片的sgl_pixmap_t结构体
+      // 存储所有生成的pixmap信息
+      const pixmapInfosForArray = [];
+      
+      // 生成每个图片的sgl_pixmap_t结构体信息
       for (const info of pixmapInfos) {
-        const pixmapName = `${info.name}_image`;
-        binCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
-        binCode += `    .width = ${info.width},\n`;
-        binCode += `    .height = ${info.height},\n`;
-        binCode += `    .bitmap.addr = 0x${currentAddress.toString(16).padStart(8, '0')},\n`;
-        binCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
-        binCode += `};\n\n`;
+        pixmapInfosForArray.push({
+          width: info.width,
+          height: info.height,
+          address: currentAddress,
+          format: getSGLFormat(colorFormat.value, compression.value)
+        });
+        
+        // 如果没有勾选"组合为数组"，生成单独的sgl_pixmap_t结构体
+        if (!combineAsArray.value) {
+          const pixmapName = `${info.name}_image`;
+          binCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
+          binCode += `    .width = ${info.width},\n`;
+          binCode += `    .height = ${info.height},\n`;
+          binCode += `    .bitmap.addr = 0x${currentAddress.toString(16).padStart(8, '0')},\n`;
+          binCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
+          binCode += `};\n\n`;
+        }
         
         // 更新当前地址
         currentAddress += info.bitmapData.length;
+      }
+      
+      // 如果勾选了"组合为数组"，生成一个包含所有pixmap的数组
+      if (combineAsArray.value) {
+        binCode += `const sgl_pixmap_t ${arrayNameValue}[${pixmapInfosForArray.length}] = {\n`;
+        for (const info of pixmapInfosForArray) {
+          binCode += `    {\n`;
+          binCode += `        .width = ${info.width},\n`;
+          binCode += `        .height = ${info.height},\n`;
+          binCode += `        .bitmap.addr = 0x${info.address.toString(16).padStart(8, '0')},\n`;
+          binCode += `        .format = ${info.format},\n`;
+          binCode += `    },\n`;
+        }
+        binCode += `};\n\n`;
       }
       
       // 添加到结果数组
