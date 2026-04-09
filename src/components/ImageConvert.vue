@@ -661,29 +661,94 @@ async function convertImage() {
     const previews = await Promise.all(previewPromises);
     conversionPreviews.value = previews;
     
+    // 无论是否组合为数组，都将所有结果合并到一个框中显示
+    let combinedCode = '';
+    let resultName = '';
+    
     if (combineAsArray.value && imageFiles.value.length > 1) {
       // 生成组合数组
-      const combinedCode = await generateCombinedArray();
+      combinedCode = await generateCombinedArray();
       // 使用数组名输入框的值作为结果名称
-      const resultName = arrayName.value || 'combined_array';
-      conversionResults.value.push({
-        name: resultName,
-        code: combinedCode
-      });
+      resultName = arrayName.value || 'combined_array';
     } else {
-      // 为每张图片生成单独的代码
+      // 为每张图片生成代码并合并，确保所有bitmap在前面，所有sgl_pixmap_t在后面
+      resultName = 'combined_results';
+      
+      // 添加include头文件（只添加一份）
+      combinedCode = `#include <stdint.h>\n`;
+      combinedCode += `#include <sgl_core.h>\n\n`;
+      
+      // 存储所有pixmap信息，用于最后生成结构体
+      const pixmapInfos = [];
+      
+      // 先生成所有bitmap数组
       for (let i = 0; i < imageFiles.value.length; i++) {
         const image = imageFiles.value[i];
         addInfoMessage(`正在转换: ${image.name}`, 'info');
         
-        // 生成C语言数组
-        const cCode = await generateCArray(image, i);
-        conversionResults.value.push({
-          name: image.name,
-          code: cCode
+        // 获取图片的实际像素数据
+        const bitmapData = await getImagePixelData(image);
+        const width = image.width || 32;
+        const height = image.height || 32;
+        const totalBytes = bitmapData.length;
+        
+        // 生成bitmap数组
+        const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
+        const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+        const bitmapName = `${safeFilename}_bitmap`;
+        
+        // 存储pixmap信息
+        pixmapInfos.push({
+          name: safeFilename,
+          width: width,
+          height: height,
+          bitmapName: bitmapName
         });
+        
+        // 添加压缩算法注释
+        if (compression.value === 'rle') {
+          combinedCode += `// RLE压缩数据\n`;
+        }
+        
+        combinedCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
+        
+        let line = '    ';
+        for (let j = 0; j < bitmapData.length; j++) {
+          line += `0x${bitmapData[j].toString(16).padStart(2, '0')}`;
+          if (j < bitmapData.length - 1) {
+            line += ', ';
+          }
+          
+          // 每24个字节换行
+          if ((j + 1) % 24 === 0 && j < bitmapData.length - 1) {
+            combinedCode += line + '\n';
+            line = '    ';
+          }
+        }
+        
+        if (line.trim()) {
+          combinedCode += line + '\n';
+        }
+        combinedCode += `};\n\n`;
+      }
+      
+      // 最后生成所有sgl_pixmap_t结构体
+      for (const info of pixmapInfos) {
+        const pixmapName = `${info.name}_image`;
+        combinedCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
+        combinedCode += `    .width = ${info.width},\n`;
+        combinedCode += `    .height = ${info.height},\n`;
+        combinedCode += `    .bitmap.array = ${info.bitmapName},\n`;
+        combinedCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
+        combinedCode += `};\n\n`;
       }
     }
+    
+    // 添加到结果数组
+    conversionResults.value.push({
+      name: resultName,
+      code: combinedCode
+    });
     
     addInfoMessage('转换成功！', 'info');
     isConverting.value = false;
