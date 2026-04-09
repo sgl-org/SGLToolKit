@@ -65,13 +65,44 @@ async fn write_file(path: String, content: String) -> std::collections::HashMap<
     result
 }
 
+#[tauri::command]
+async fn write_bin_file(path: String, content: String) -> std::collections::HashMap<String, String> {
+    use std::fs;
+    use base64::{Engine as _, engine::general_purpose};
+    
+    let mut result = std::collections::HashMap::new();
+    
+    // 解码base64字符串
+    match general_purpose::STANDARD.decode(&content) {
+        Ok(decoded) => {
+            // 写入文件
+            match fs::write(&path, decoded) {
+                Ok(_) => {
+                    result.insert("success".to_string(), "true".to_string());
+                    result.insert("path".to_string(), path);
+                }
+                Err(e) => {
+                    result.insert("success".to_string(), "false".to_string());
+                    result.insert("error".to_string(), format!("Failed to write file: {}", e));
+                }
+            }
+        }
+        Err(e) => {
+            result.insert("success".to_string(), "false".to_string());
+            result.insert("error".to_string(), format!("Failed to decode base64: {}", e));
+        }
+    }
+    
+    result
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, run_shell_command, read_file_as_base64, save_file, write_file])
+        .invoke_handler(tauri::generate_handler![greet, run_shell_command, read_file_as_base64, save_file, write_file, write_bin_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

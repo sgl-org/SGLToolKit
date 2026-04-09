@@ -210,7 +210,7 @@
               </button>
               <button 
                 class="download-result-btn"
-                @click="downloadResult(result.code, result.name)"
+                @click="result.binData ? downloadBinResult(result.binData, result.name) : downloadResult(result.code, result.name)"
                 title="下载文件"
               >
                 下载
@@ -661,94 +661,170 @@ async function convertImage() {
     const previews = await Promise.all(previewPromises);
     conversionPreviews.value = previews;
     
-    // 无论是否组合为数组，都将所有结果合并到一个框中显示
-    let combinedCode = '';
-    let resultName = '';
+    // 存储所有bitmap数据，用于生成bin文件
+    let combinedBitmap = new Uint8Array(0);
     
-    if (combineAsArray.value && imageFiles.value.length > 1) {
-      // 生成组合数组
-      combinedCode = await generateCombinedArray();
-      // 使用数组名输入框的值作为结果名称
-      resultName = arrayName.value || 'combined_array';
-    } else {
-      // 为每张图片生成代码并合并，确保所有bitmap在前面，所有sgl_pixmap_t在后面
-      resultName = 'combined_results';
+    // 存储所有pixmap信息，用于生成结构体
+    const pixmapInfos = [];
+    
+    // 先生成所有bitmap数据
+    const results = await Promise.all(imageFiles.value.map(async (image) => {
+      addInfoMessage(`正在转换: ${image.name}`, 'info');
       
-      // 添加include头文件（只添加一份）
-      combinedCode = `#include <stdint.h>\n`;
-      combinedCode += `#include <sgl_core.h>\n\n`;
+      // 获取图片的实际像素数据
+      const bitmapData = await getImagePixelData(image);
+      const width = image.width || 32;
+      const height = image.height || 32;
       
-      // 存储所有pixmap信息，用于最后生成结构体
-      const pixmapInfos = [];
+      // 生成bitmap数组
+      const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
+      const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+      const bitmapName = `${safeFilename}_bitmap`;
       
-      // 先生成所有bitmap数组
-      for (let i = 0; i < imageFiles.value.length; i++) {
-        const image = imageFiles.value[i];
-        addInfoMessage(`正在转换: ${image.name}`, 'info');
-        
-        // 获取图片的实际像素数据
-        const bitmapData = await getImagePixelData(image);
-        const width = image.width || 32;
-        const height = image.height || 32;
-        const totalBytes = bitmapData.length;
-        
-        // 生成bitmap数组
-        const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
-        const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-        const bitmapName = `${safeFilename}_bitmap`;
-        
-        // 存储pixmap信息
-        pixmapInfos.push({
-          name: safeFilename,
-          width: width,
-          height: height,
-          bitmapName: bitmapName
-        });
-        
-        // 添加压缩算法注释
-        if (compression.value === 'rle') {
-          combinedCode += `// RLE压缩数据\n`;
-        }
-        
-        combinedCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
-        
-        let line = '    ';
-        for (let j = 0; j < bitmapData.length; j++) {
-          line += `0x${bitmapData[j].toString(16).padStart(2, '0')}`;
-          if (j < bitmapData.length - 1) {
-            line += ', ';
-          }
-          
-          // 每24个字节换行
-          if ((j + 1) % 24 === 0 && j < bitmapData.length - 1) {
-            combinedCode += line + '\n';
-            line = '    ';
-          }
-        }
-        
-        if (line.trim()) {
-          combinedCode += line + '\n';
-        }
-        combinedCode += `};\n\n`;
-      }
+      return {
+        safeFilename: safeFilename,
+        width: width,
+        height: height,
+        bitmapName: bitmapName,
+        bitmapData: bitmapData
+      };
+    }));
+    
+    // 处理结果并构建combinedBitmap
+    for (const result of results) {
+      // 存储pixmap信息
+      pixmapInfos.push({
+        name: result.safeFilename,
+        width: result.width,
+        height: result.height,
+        bitmapName: result.bitmapName,
+        bitmapData: result.bitmapData
+      });
       
-      // 最后生成所有sgl_pixmap_t结构体
-      for (const info of pixmapInfos) {
-        const pixmapName = `${info.name}_image`;
-        combinedCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
-        combinedCode += `    .width = ${info.width},\n`;
-        combinedCode += `    .height = ${info.height},\n`;
-        combinedCode += `    .bitmap.array = ${info.bitmapName},\n`;
-        combinedCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
-        combinedCode += `};\n\n`;
-      }
+      // 将bitmap数据添加到组合数组中（用于生成bin文件）
+      // 创建新的Uint8Array，包含原有数据和新数据
+      const newSize = combinedBitmap.length + result.bitmapData.length;
+      const newCombinedBitmap = new Uint8Array(newSize);
+      newCombinedBitmap.set(combinedBitmap, 0);
+      newCombinedBitmap.set(result.bitmapData, combinedBitmap.length);
+      combinedBitmap = newCombinedBitmap;
     }
     
-    // 添加到结果数组
-    conversionResults.value.push({
-      name: resultName,
-      code: combinedCode
-    });
+    // 如果是bin文件输出格式，生成bin文件
+    if (outputFormat.value === 'bin') {
+      // 生成bin文件数据（用于下载）
+      const binData = new Uint8Array(combinedBitmap);
+      
+      // 获取数组名，用于命名bin文件和结构体文件
+      const arrayNameValue = arrayName.value || 'flash_image';
+      
+      // 添加bin文件下载选项
+      conversionResults.value.push({
+        name: `${arrayNameValue}.bin`,
+        code: '',
+        binData: binData,
+        binSize: binData.length
+      });
+      
+      // 生成包含地址信息的sgl_pixmap_t结构体
+      let binCode = `#include <stdint.h>\n`;
+      binCode += `#include <sgl_core.h>\n\n`;
+      
+      // 获取用户指定的起始地址偏移
+      const startAddress = parseInt(binStartAddress.value, 16) || 0;
+      let currentAddress = startAddress;
+      
+      // 生成每个图片的sgl_pixmap_t结构体
+      for (const info of pixmapInfos) {
+        const pixmapName = `${info.name}_image`;
+        binCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
+        binCode += `    .width = ${info.width},\n`;
+        binCode += `    .height = ${info.height},\n`;
+        binCode += `    .bitmap.addr = 0x${currentAddress.toString(16).padStart(8, '0')},\n`;
+        binCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
+        binCode += `};\n\n`;
+        
+        // 更新当前地址
+        currentAddress += info.bitmapData.length;
+      }
+      
+      // 添加到结果数组
+      conversionResults.value.push({
+        name: `${arrayNameValue}.c`,
+        code: binCode
+      });
+    } else {
+      // 非bin文件格式，生成C代码
+      let combinedCode = '';
+      let resultName = '';
+      
+      if (combineAsArray.value && imageFiles.value.length > 1) {
+        // 生成组合数组
+        combinedCode = await generateCombinedArray();
+        // 使用数组名输入框的值作为结果名称
+        resultName = arrayName.value || 'combined_array';
+      } else {
+        // 为每张图片生成代码并合并，确保所有bitmap在前面，所有sgl_pixmap_t在后面
+        resultName = 'combined_results';
+        
+        // 添加include头文件（只添加一份）
+        combinedCode = `#include <stdint.h>\n`;
+        combinedCode += `#include <sgl_core.h>\n\n`;
+        
+        // 先生成所有bitmap数组
+        for (const info of pixmapInfos) {
+          const totalBytes = info.bitmapData.length;
+          
+          // 生成bitmap数组代码
+          let bitmapCode = '';
+          // 添加压缩算法注释
+          if (compression.value === 'rle') {
+            bitmapCode += `// RLE压缩数据\n`;
+          }
+          
+          bitmapCode += `static const uint8_t ${info.bitmapName}[${totalBytes}] = {\n`;
+          
+          let line = '    ';
+          for (let j = 0; j < info.bitmapData.length; j++) {
+            line += `0x${info.bitmapData[j].toString(16).padStart(2, '0')}`;
+            if (j < info.bitmapData.length - 1) {
+              line += ', ';
+            }
+            
+            // 每24个字节换行
+            if ((j + 1) % 24 === 0 && j < info.bitmapData.length - 1) {
+              bitmapCode += line + '\n';
+              line = '    ';
+            }
+          }
+          
+          if (line.trim()) {
+            bitmapCode += line + '\n';
+          }
+          bitmapCode += `};\n\n`;
+          
+          // 添加bitmap数组代码
+          combinedCode += bitmapCode;
+        }
+        
+        // 最后生成所有sgl_pixmap_t结构体
+        for (const info of pixmapInfos) {
+          const pixmapName = `${info.name}_image`;
+          combinedCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
+          combinedCode += `    .width = ${info.width},\n`;
+          combinedCode += `    .height = ${info.height},\n`;
+          combinedCode += `    .bitmap.array = ${info.bitmapName},\n`;
+          combinedCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
+          combinedCode += `};\n\n`;
+        }
+      }
+      
+      // 添加到结果数组
+      conversionResults.value.push({
+        name: resultName,
+        code: combinedCode
+      });
+    }
     
     addInfoMessage('转换成功！', 'info');
     isConverting.value = false;
@@ -1285,12 +1361,12 @@ async function downloadResult(code, filename) {
       
       console.log('write_file命令返回:', result);
       
-      if (result.success) {
+      if (result && result.success === 'true') {
         console.log('文件保存成功');
-        addInfoMessage(`文件已保存：${result.path}`, 'info');
+        addInfoMessage(`文件已保存：${result.path || filePath}`, 'info');
       } else {
         console.log('文件保存失败');
-        addInfoMessage(`文件保存失败：${result.error}`, 'error');
+        addInfoMessage(`文件保存失败：${result?.error || '未知错误'}`, 'error');
       }
     } catch (invokeError) {
       console.error('Invoke操作失败：', invokeError);
@@ -1305,6 +1381,87 @@ async function downloadResult(code, filename) {
     console.error('错误消息:', err.message);
     console.error('错误堆栈:', err.stack);
     addInfoMessage(`下载失败：${err.message || '未知错误'}`, 'error');
+  }
+}
+
+// 下载bin文件结果
+async function downloadBinResult(binData, filename) {
+  try {
+    // 生成文件名：使用传入的文件名，确保使用.bin扩展名
+    const safeFilename = filename.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+    const defaultFileName = `${safeFilename}.bin`;
+    
+    console.log('开始下载bin文件，文件名:', defaultFileName);
+    
+    // 检查是否存在输出文件夹
+    if (!outputFolder.value) {
+      console.error('未选择输出文件夹');
+      addInfoMessage('请先选择输出文件夹', 'error');
+      return;
+    }
+    
+    console.log('使用用户选择的输出文件夹:', outputFolder.value);
+    
+    // 构建完整的文件路径
+    const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
+    const filePath = outputFolder.value + separator + defaultFileName;
+    console.log('构建的文件路径:', filePath);
+    
+    // 尝试使用Tauri的invoke API来调用自定义的Rust命令
+    try {
+      console.log('尝试导入invoke API');
+      const { invoke } = await import('@tauri-apps/api/core');
+      console.log('invoke API导入成功');
+      
+      // 使用更可靠的方法将Uint8Array转换为base64字符串
+      // 创建一个Blob对象
+      const blob = new Blob([binData], { type: 'application/octet-stream' });
+      
+      // 使用FileReader来读取并转换为base64
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          // 移除data URL前缀，只获取base64部分
+          const result = reader.result;
+          if (typeof result === 'string') {
+            const base64 = result.split(',')[1];
+            resolve(base64);
+          } else {
+            reject(new Error('Failed to read blob'));
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      
+      console.log('调用write_bin_file命令');
+      const result = await invoke('write_bin_file', {
+        path: filePath,
+        content: base64Data
+      });
+      
+      console.log('write_bin_file命令返回:', result);
+      
+      if (result && result.success === 'true') {
+        console.log('bin文件保存成功');
+        addInfoMessage(`bin文件已保存：${result.path || filePath}`, 'info');
+      } else {
+        console.log('bin文件保存失败');
+        addInfoMessage(`bin文件保存失败：${result?.error || '未知错误'}`, 'error');
+      }
+    } catch (invokeError) {
+      console.error('Invoke操作失败：', invokeError);
+      console.error('错误名称:', invokeError.name);
+      console.error('错误消息:', invokeError.message);
+      console.error('错误堆栈:', invokeError.stack);
+      addInfoMessage(`bin文件写入失败：${invokeError.message || '未知错误'}`, 'error');
+    }
+  } catch (err) {
+    console.error('bin文件下载失败：', err);
+    console.error('错误名称:', err.name);
+    console.error('错误消息:', err.message);
+    console.error('错误堆栈:', err.stack);
+    addInfoMessage(`bin文件下载失败：${err.message || '未知错误'}`, 'error');
   }
 }
 
