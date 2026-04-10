@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 // 本地图标
 import iconFont from './icons/font.png'
 import iconImage from './icons/image.png'
+import iconGif from './icons/gif.png'
 import iconAbout from './icons/about.png' // 🔥 新增关于图标
 
 const router = useRouter()
@@ -16,6 +17,7 @@ const shakeIndex = ref(null)
 const menus = ref([
   { path: '/font-convert', icon: iconFont, name: '字体转换' },
   { path: '/image-convert', icon: iconImage, name: '图片转换' },
+  { path: '/gif-to-image', icon: iconGif, name: 'GIF转换' },
   { path: '/about-info', icon: iconAbout, name: '关于' }, // 🔥 这里添加
 ])
 
