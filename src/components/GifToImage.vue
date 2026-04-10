@@ -59,6 +59,13 @@
               <span class="frame-count-info">共 {{ totalFrames }} 帧</span>
             </div>
           </div>
+          <div class="setting-item">
+            <label class="form-label">输出文件夹</label>
+            <div class="file-input-wrapper">
+              <input v-model="outputFolder" type="text" class="form-input path-input" placeholder="选择输出文件夹">
+              <button class="file-select-btn" @click="selectOutputFolder">浏览</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -164,6 +171,7 @@ const conversionResults = ref([]);
 const frameCount = ref(1);
 const totalFrames = ref(1);
 const isDownloading = ref(false);
+const outputFolder = ref('');
 
 // 选择GIF文件
 async function selectGifFile() {
@@ -217,6 +225,26 @@ async function selectGifFile() {
   } catch (error) {
     console.error('选择文件失败:', error);
     addInfoMessage(`选择文件失败: ${error.message}`, 'error');
+  }
+}
+
+// 选择输出文件夹
+async function selectOutputFolder() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择输出文件夹'
+    });
+    
+    if (selected) {
+      const folderPath = Array.isArray(selected) ? selected[0] : selected;
+      outputFolder.value = folderPath;
+      addInfoMessage(`已选择输出文件夹: ${folderPath}`, 'info');
+    }
+  } catch (err) {
+    console.error('选择输出文件夹失败：', err);
+    addInfoMessage(`选择输出文件夹失败: ${JSON.stringify(err)}`, 'error');
   }
 }
 
@@ -449,28 +477,58 @@ async function downloadAsZip() {
     isDownloading.value = true;
     addInfoMessage('开始打包下载...', 'info');
     
-    // 选择下载路径
-    const selectedFolder = await open({
-      directory: true,
-      multiple: false,
-      title: '选择下载路径'
-    });
-    
-    if (selectedFolder) {
-      const folderPath = Array.isArray(selectedFolder) ? selectedFolder[0] : selectedFolder;
-      
-      // 模拟打包过程
-      setTimeout(() => {
-        addInfoMessage(`ZIP文件已保存到: ${folderPath}`, 'info');
-        isDownloading.value = false;
-      }, 1500);
-    } else {
-      addInfoMessage('取消下载', 'info');
+    // 检查是否存在输出文件夹
+    if (!outputFolder.value) {
+      console.error('未选择输出文件夹');
+      addInfoMessage('请先选择输出文件夹', 'error');
       isDownloading.value = false;
+      return;
+    }
+    
+    // 构建ZIP文件名
+    const zipFileName = `${gifFile.value?.name.replace('.gif', '') || 'gif_frames'}_converted.zip`;
+    
+    // 构建完整的文件路径
+    const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
+    const zipFilePath = outputFolder.value + separator + zipFileName;
+    
+    console.log('打包下载ZIP文件:', zipFilePath);
+    
+    // 尝试使用Tauri的invoke API来调用打包下载命令
+    try {
+      console.log('尝试导入invoke API');
+      const { invoke } = await import('@tauri-apps/api/core');
+      console.log('invoke API导入成功');
+      
+      // 准备要打包的文件列表
+      const filesToZip = conversionResults.value.map((result, index) => ({
+        name: result.name,
+        url: result.url
+      }));
+      
+      console.log('调用zip_files命令');
+      const result = await invoke('zip_files', {
+        files: filesToZip,
+        outputPath: zipFilePath
+      });
+      
+      console.log('zip_files命令返回:', result);
+      
+      if (result && result.success === 'true') {
+        console.log('ZIP文件生成成功');
+        addInfoMessage(`ZIP文件已保存：${result.path || zipFilePath}`, 'info');
+      } else {
+        console.log('ZIP文件生成失败');
+        addInfoMessage(`ZIP文件生成失败：${result?.error || '未知错误'}`, 'error');
+      }
+    } catch (invokeError) {
+      console.error('Invoke操作失败：', invokeError);
+      addInfoMessage(`打包下载失败：${invokeError.message || '未知错误'}`, 'error');
     }
   } catch (error) {
     console.error('打包下载失败:', error);
     addInfoMessage(`打包下载失败: ${error.message}`, 'error');
+  } finally {
     isDownloading.value = false;
   }
 }
@@ -499,6 +557,14 @@ function addInfoMessage(content, type = 'info') {
   if (infoMessages.value.length > 50) {
     infoMessages.value.shift();
   }
+  
+  // 自动滚动到最新消息
+  setTimeout(() => {
+    const infoMessagesElement = document.querySelector('.info-messages');
+    if (infoMessagesElement) {
+      infoMessagesElement.scrollTop = infoMessagesElement.scrollHeight;
+    }
+  }, 100);
 }
 </script>
 
@@ -760,6 +826,30 @@ h3 {
   font-size: 12px;
   color: #666;
   white-space: nowrap;
+}
+
+.file-input-wrapper {
+  display: flex;
+  gap: 8px;
+}
+
+.path-input {
+  flex: 1;
+}
+
+.file-select-btn {
+  background: #5a86ff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.file-select-btn:hover {
+  background: #4a76e9;
 }
 
 .convert-btn {
@@ -1027,6 +1117,26 @@ html.dark .frame-info {
 
 html.dark .frame-index {
   color: #e0e0e0;
+}
+
+html.dark .path-input {
+  background: #252a3a;
+  border-color: #3a3f55;
+  color: #e0e0e0;
+}
+
+html.dark .path-input:focus {
+  border-color: #6699ff;
+  background: #2f354a;
+}
+
+html.dark .file-select-btn {
+  background: #6699ff;
+  color: white;
+}
+
+html.dark .file-select-btn:hover {
+  background: #5588ee;
 }
 
 html.dark .settings-grid {
