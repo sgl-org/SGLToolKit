@@ -58,7 +58,7 @@ class SglCmap extends Cmap {
         entries_count = d.codes.length;
 
         defs = `
-static const uint32_t unicode_list_${idx}[] = {
+static const uint16_t unicode_list_${idx}[] = {
 ${u.long_dump(d.codes, { hex: true })}
 };
 `.trim();
@@ -70,7 +70,7 @@ ${u.long_dump(d.codes, { hex: true })}
         entries_count = d.codes.length;
 
         defs = `
-static const uint32_t unicode_list_${idx}[] = {
+static const uint16_t unicode_list_${idx}[] = {
 ${u.long_dump(d.codes, { hex: true })}
 };
 `.trim();
