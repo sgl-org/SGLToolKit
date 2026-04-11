@@ -14,9 +14,23 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 async fn run_shell_command(cmd: String, args: Vec<String>) -> Result<String, String> {
     use std::process::Command;
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
 
-    let output = Command::new(cmd)
-        .args(args)
+    // 打印命令和参数，用于调试
+    println!("Executing command: {} with args: {:?}", cmd, args);
+
+    let mut command = Command::new(cmd);
+    command.args(args);
+
+    // 在Windows上隐藏命令窗口
+    #[cfg(windows)]
+    {
+        // 只使用CREATE_NO_WINDOW标志，避免其他标志可能导致的问题
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let output = command
         .output()
         .map_err(|e| format!("Failed to execute command: {}", e))?;
 

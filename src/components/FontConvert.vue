@@ -520,7 +520,9 @@ async function convertFont() {
   isConverting.value = true;
 
   try {
-    const exePath = '../src/sgl_font_conv/sgl_font_conv.exe';
+    // 直接使用当前目录中的sgl_font_conv.exe文件
+    const exePath = 'sgl_font_conv.exe';
+    console.log('使用的sgl_font_conv.exe路径:', exePath);
 
     const args = [
       '--size', fontSize.value.toString(),
@@ -576,11 +578,14 @@ async function convertFont() {
     args.push('--output', outputFullPath);
 
     // 构建完整的命令字符串用于打印
-    const commandStr = `${exePath} ${args.join(' ')}`;
+    const commandStr = `${exePath} ${args.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`;
     console.log("========================================");
     console.log("调用命令:");
     console.log(commandStr);
     console.log("========================================");
+
+    // 确保参数格式正确
+    console.log("参数列表:", args);
 
     const result = await invoke("run_shell_command", { cmd: exePath, args });
 
