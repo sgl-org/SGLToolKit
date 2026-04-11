@@ -10,7 +10,10 @@
       <!-- 图片预览框 -->
       <div class="form-section">
         <div class="form-label-with-button">
-          <label class="form-label">图片预览 (双击分辨率可编辑大小)</label>
+          <div class="form-label">
+            图片预览 (双击分辨率可编辑大小)
+            <span v-if="imageFiles.length > 0" class="size-info">(总大小: {{ formatBytes(totalOriginalSize) }})</span>
+          </div>
           <button 
             v-if="imageFiles.length > 0" 
             class="clear-all-btn" 
@@ -168,7 +171,10 @@
 
       <!-- 转换后预览框 -->
       <div v-if="conversionPreviews.length > 0" class="form-section">
-        <div class="form-label">转换后预览</div>
+        <div class="form-label">
+          转换后预览
+          <span class="size-info">(总大小: {{ formatBytes(totalCompressedSize) }}, 压缩率: {{ overallCompressionRatio }}%)</span>
+        </div>
         <div class="conversion-preview-container">
           <div class="preview-grid">
             <div v-for="(preview, index) in conversionPreviews" :key="index" class="preview-item">
@@ -351,8 +357,15 @@ function saveSettings() {
 }
 
 // 监听设置变化
-watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes], () => {
+watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes], async () => {
   saveSettings();
+  
+  // 当颜色格式或压缩算法改变时，重新生成预览
+  if (imageFiles.value.length > 0) {
+    const previewPromises = imageFiles.value.map(image => generatePreview(image));
+    const previews = await Promise.all(previewPromises);
+    conversionPreviews.value = previews;
+  }
 }, { deep: true });
 
 // 初始化时加载设置
@@ -361,6 +374,32 @@ loadSettings();
 // 计算属性
 const canConvert = computed(() => {
   return imageFiles.value.length > 0;
+});
+
+// 计算所有图片的总大小
+const totalOriginalSize = computed(() => {
+  return imageFiles.value.reduce((total, image) => {
+    const width = image.width || 0;
+    const height = image.height || 0;
+    const bytesPerPixel = getBytesPerPixel(colorFormat.value); // 根据选择的颜色格式计算每个像素的字节数
+    return total + (width * height * bytesPerPixel);
+  }, 0);
+});
+
+// 计算转换后的总大小
+const totalCompressedSize = computed(() => {
+  return conversionPreviews.value.reduce((total, preview) => {
+    return total + (preview.compressedSize || 0);
+  }, 0);
+});
+
+// 计算压缩比
+const overallCompressionRatio = computed(() => {
+  if (totalOriginalSize.value === 0) return 0;
+  // 如果选择了无压缩，直接返回0%
+  if (compression.value === 'none') return 0;
+  const ratio = ((totalOriginalSize.value - totalCompressedSize.value) / totalOriginalSize.value * 100).toFixed(1);
+  return parseFloat(ratio);
 });
 
 // 选择图片文件
@@ -1574,6 +1613,13 @@ h2 {
   font-weight: 500;
   color: #333;
   font-size: 14px;
+}
+
+.size-info {
+  font-size: 12px;
+  color: #666;
+  margin-left: 8px;
+  font-weight: normal;
 }
 
 .form-label-with-button {
