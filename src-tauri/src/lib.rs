@@ -23,6 +23,9 @@ async fn run_shell_command(cmd: String, args: Vec<String>) -> Result<String, Str
     let mut command = Command::new(cmd);
     command.args(args);
 
+    // 设置环境变量，跳过Node.js平台检查
+    command.env("NODE_SKIP_PLATFORM_CHECK", "1");
+
     // 在Windows上隐藏命令窗口
     #[cfg(windows)]
     {
