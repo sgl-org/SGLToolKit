@@ -1135,12 +1135,20 @@ function getImagePixelData(image) {
             break;
           case 'RGB565':
             // RGB565: 5 bits R, 6 bits G, 5 bits B（小端序）
-            const rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            // 线性映射：2-255 映射到目标范围
+            const r5 = Math.round(r / 255 * 31); // 5位：0-31
+            const g6 = Math.round(g / 255 * 63); // 6位：0-63
+            const b5 = Math.round(b / 255 * 31); // 5位：0-31
+            const rgb565 = (r5 << 11) | (g6 << 5) | b5;
             bitmapData.push(rgb565 & 0xFF, (rgb565 >> 8) & 0xFF);
             break;
           case 'RGB332':
             // RGB332: 3 bits R, 3 bits G, 2 bits B
-            const rgb332 = ((r >> 5) << 5) | ((g >> 5) << 2) | (b >> 6);
+            // 线性映射：2-255 映射到目标范围
+            const r3 = Math.round(r / 255 * 7); // 3位：0-7
+            const g3 = Math.round(g / 255 * 7); // 3位：0-7
+            const b2 = Math.round(b / 255 * 3); // 2位：0-3
+            const rgb332 = (r3 << 5) | (g3 << 2) | b2;
             bitmapData.push(rgb332);
             break;
           case 'ARGB8888':
@@ -1149,12 +1157,22 @@ function getImagePixelData(image) {
             break;
           case 'ARGB4444':
             // ARGB4444: 4 bits each
-            const argb4444 = ((a >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+            // 线性映射：2-255 映射到目标范围
+            const a4 = Math.round(a / 255 * 15); // 4位：0-15
+            const r4 = Math.round(r / 255 * 15); // 4位：0-15
+            const g4 = Math.round(g / 255 * 15); // 4位：0-15
+            const b4 = Math.round(b / 255 * 15); // 4位：0-15
+            const argb4444 = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
             bitmapData.push(argb4444 & 0xFF, (argb4444 >> 8) & 0xFF);
             break;
           case 'ARGB2222':
             // ARGB2222: 2 bits each
-            const argb2222 = ((a >> 6) << 6) | ((r >> 6) << 4) | ((g >> 6) << 2) | (b >> 6);
+            // 线性映射：2-255 映射到目标范围
+            const a2 = Math.round(a / 255 * 3); // 2位：0-3
+            const r2 = Math.round(r / 255 * 3); // 2位：0-3
+            const g2 = Math.round(g / 255 * 3); // 2位：0-3
+            const b2_2 = Math.round(b / 255 * 3); // 2位：0-3
+            const argb2222 = (a2 << 6) | (r2 << 4) | (g2 << 2) | b2_2;
             bitmapData.push(argb2222);
             break;
           default:
