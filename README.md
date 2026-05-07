@@ -8,3 +8,4 @@ This template should help get you started developing with Tauri + Vue 3 in Vite.
 
 
 npm.cmd run tauri dev
+测试使用：../src/sgl_font_conv/sgl_font_conv.exe
