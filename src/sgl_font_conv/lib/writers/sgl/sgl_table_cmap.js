@@ -105,8 +105,7 @@ ${u.long_dump(d.codes, { hex: true })}
 
 ${this.sgl_subtables.map(d => d.defs).filter(Boolean).join('\n\n')}
 
-static const sgl_font_unicode_t font_unicode[] =
-{
+static const sgl_font_unicode_t font_unicode[] = {
 ${this.sgl_subtables.map(d => d.head).join(',\n')}
 };
 `.trim();
