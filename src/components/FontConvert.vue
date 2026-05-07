@@ -521,7 +521,7 @@ async function convertFont() {
 
   try {
     // 直接使用当前目录中的sgl_font_conv.exe文件
-    const exePath = 'sgl_font_conv.exe';
+    const exePath = '../src/sgl_font_conv/sgl_font_conv.exe';
     console.log('使用的sgl_font_conv.exe路径:', exePath);
 
     const args = [
@@ -543,7 +543,8 @@ async function convertFont() {
       if (customChars.value) {
         // 对自定义字符按Unicode码点排序
         const sortedChars = customChars.value.split('').sort((a, b) => a.codePointAt(0) - b.codePointAt(0)).join('');
-        args.push('--symbols', sortedChars);
+        // 使用 = 连接，这样 - 开头的字符不会被当作选项解析
+        args.push('--symbols=' + sortedChars);
       }
     }
 
@@ -555,7 +556,8 @@ async function convertFont() {
       const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
       const iconSymbols = sortedIcons.map(icon => icon.char).join('');
       if (iconSymbols) {
-        args.push('--symbols', iconSymbols);
+        // 使用 = 连接，这样 - 开头的字符不会被当作选项解析
+        args.push('--symbols=' + iconSymbols);
       }
     }
 
