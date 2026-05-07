@@ -521,7 +521,8 @@ async function convertFont() {
 
   try {
     // 直接使用当前目录中的sgl_font_conv.exe文件
-    const exePath = '../src/sgl_font_conv/sgl_font_conv.exe';
+    // 测试使用：const exePath = '../src/sgl_font_conv/sgl_font_conv.exe';
+    const exePath = 'sgl_font_conv.exe';
     console.log('使用的sgl_font_conv.exe路径:', exePath);
 
     const args = [
