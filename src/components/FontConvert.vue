@@ -528,8 +528,6 @@ async function convertFont() {
     const args = [
       '--size', fontSize.value.toString(),
       '--bpp', bpp.value.toString(),
-      '--format', 'sgl',
-      '--align', align.value.toString()
     ];
 
     // 检查是否需要添加字体文件
@@ -538,14 +536,13 @@ async function convertFont() {
       args.push('--font', fontFilePath.value);
       // 添加主字体的范围
       for (const range of charRanges.value) {
-        args.push('-r', `0x${range.start.toString(16)}-0x${range.end.toString(16)}`);
+        args.push('--range', `0x${range.start.toString(16)}-0x${range.end.toString(16)}`);
       }
       // 添加主字体的自定义字符
       if (customChars.value) {
         // 对自定义字符按Unicode码点排序
         const sortedChars = customChars.value.split('').sort((a, b) => a.codePointAt(0) - b.codePointAt(0)).join('');
-        // 使用 = 连接，这样 - 开头的字符不会被当作选项解析
-        args.push('--symbols=' + sortedChars);
+        args.push('--symbols', sortedChars);
       }
     }
 
@@ -557,8 +554,7 @@ async function convertFont() {
       const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
       const iconSymbols = sortedIcons.map(icon => icon.char).join('');
       if (iconSymbols) {
-        // 使用 = 连接，这样 - 开头的字符不会被当作选项解析
-        args.push('--symbols=' + iconSymbols);
+        args.push('--symbols', iconSymbols);
       }
     }
 
@@ -580,8 +576,15 @@ async function convertFont() {
     }
     args.push('--output', outputFullPath);
 
-    // 构建完整的命令字符串用于打印
-    const commandStr = `${exePath} ${args.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`;
+    // 构建完整的命令字符串用于打印（--参数不加引号，参数值使用单引号）
+    let commandStr = exePath;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i].startsWith('--')) {
+        commandStr += ` ${args[i]}`;
+      } else {
+        commandStr += ` '${args[i]}'`;
+      }
+    }
     console.log("========================================");
     console.log("调用命令:");
     console.log(commandStr);
@@ -593,11 +596,13 @@ async function convertFont() {
     const result = await invoke("run_shell_command", { cmd: exePath, args });
 
     console.log("转换成功:", result);
-    addInfoMessage(`转换成功！\n${result}`, 'info');
+    addInfoMessage('转换成功！', 'info');
 
   } catch (err) {
     console.error("转换失败:", err);
-    addInfoMessage(`转换失败：\n${String(err)}`, 'error');
+    const errorMsg = typeof err === 'object' ? JSON.stringify(err, null, 2) : String(err);
+    const fullErrorMsg = `转换失败\n命令: ${commandStr}\n错误: ${errorMsg}`;
+    addInfoMessage(fullErrorMsg, 'error');
   } finally {
     isConverting.value = false;
   }
