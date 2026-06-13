@@ -596,6 +596,51 @@ async function convertFont() {
     const result = await invoke("run_shell_command", { cmd: exePath, args });
 
     console.log("转换成功:", result);
+    
+    // 如果有图标字体，在C文件末尾追加宏定义
+    if (selectedIcons.value.length > 0) {
+      try {
+        const { readTextFile, writeTextFile } = await import('@tauri-apps/plugin-fs');
+        let cFileContent = await readTextFile(outputFullPath);
+        
+        // 生成宏定义
+        const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
+        let macroDefinitions = '\n\n// Icon macros\n';
+        
+        for (const icon of sortedIcons) {
+          const macroName = `SGL_ICON_${icon.code.toString(16).toUpperCase()}`;
+          const charBytes = icon.char.split('').map(c => {
+            const code = c.charCodeAt(0);
+            if (code < 128) {
+              return `\\x${code.toString(16).padStart(2, '0')}`;
+            } else {
+              // UTF-8编码
+              const utf8Bytes = [];
+              if (code < 0x800) {
+                utf8Bytes.push(0xC0 | (code >> 6));
+                utf8Bytes.push(0x80 | (code & 0x3F));
+              } else {
+                utf8Bytes.push(0xE0 | (code >> 12));
+                utf8Bytes.push(0x80 | ((code >> 6) & 0x3F));
+                utf8Bytes.push(0x80 | (code & 0x3F));
+              }
+              return utf8Bytes.map(b => `\\x${b.toString(16).padStart(2, '0')}`).join('');
+            }
+          }).join('');
+          
+          macroDefinitions += `#define ${macroName} "${charBytes}"\n`;
+        }
+        
+        cFileContent += macroDefinitions;
+        await writeTextFile(outputFullPath, cFileContent);
+        console.log('已追加图标宏定义到C文件');
+      } catch (err) {
+        console.error('追加宏定义失败:', err);
+        const errMsg = typeof err === 'object' ? JSON.stringify(err, null, 2) : String(err);
+        addInfoMessage(`转换成功，但追加图标宏定义失败\n错误: ${errMsg}`, 'warning');
+      }
+    }
+    
     addInfoMessage('转换成功！', 'info');
 
   } catch (err) {

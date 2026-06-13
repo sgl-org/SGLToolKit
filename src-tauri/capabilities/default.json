@@ -8,10 +8,14 @@
     "opener:default",
     "dialog:allow-open",
     "dialog:default",
-    "fs:allow-write",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "**" }]
+    },
     "fs:default"
-  ],
-  "fs": {
-    "allowWrite": ["**"]
-  }
+  ]
 }
