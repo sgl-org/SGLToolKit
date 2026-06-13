@@ -172,22 +172,6 @@
       </div>
     </div>
 
-    <div v-if="showModal" class="modal-overlay" @click="closeModal">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>{{ modalTitle }}</h3>
-          <button class="close-btn" @click="closeModal">×</button>
-        </div>
-        <div class="modal-body">
-          <pre class="result-text">{{ modalContent }}</pre>
-        </div>
-        <div class="modal-footer">
-          <button v-if="modalType === 'error'" class="copy-btn" @click="copyError">复制错误信息</button>
-          <button class="confirm-btn" @click="closeModal">确定</button>
-        </div>
-      </div>
-    </div>
-
     <div v-if="showCopyTip" class="copy-tip">复制成功！</div>
 
     <!-- 信息输出栏 -->
@@ -246,10 +230,6 @@ const compress = ref(false);
 const isConverting = ref(false);
 const infoMessagesRef = ref(null);
 
-const showModal = ref(false);
-const modalTitle = ref('');
-const modalContent = ref('');
-const modalType = ref('info');
 const showCopyTip = ref(false);
 
 const allIconsSelected = computed(() => {
@@ -281,10 +261,7 @@ async function selectFontFile() {
     }
   } catch (err) {
     console.error('选择字体文件失败：', err);
-    showModal.value = true;
-    modalTitle.value = '选择失败';
-    modalContent.value = `选择字体文件失败: ${JSON.stringify(err)}`;
-    modalType.value = 'error';
+    addInfoMessage(`选择字体文件失败: ${JSON.stringify(err)}`, 'error');
   }
 }
 
@@ -303,10 +280,7 @@ async function selectOutputDir() {
     }
   } catch (err) {
     console.error('选择文件夹失败：', err);
-    showModal.value = true;
-    modalTitle.value = '选择失败';
-    modalContent.value = `选择文件夹失败: ${JSON.stringify(err)}`;
-    modalType.value = 'error';
+    addInfoMessage(`选择文件夹失败: ${JSON.stringify(err)}`, 'error');
   }
 }
 
@@ -328,10 +302,7 @@ async function selectIconFontFile() {
     }
   } catch (err) {
     console.error('选择图标字体文件失败：', err);
-    showModal.value = true;
-    modalTitle.value = '选择失败';
-    modalContent.value = `选择图标字体文件失败: ${JSON.stringify(err)}`;
-    modalType.value = 'error';
+    addInfoMessage(`选择图标字体文件失败: ${JSON.stringify(err)}`, 'error');
   }
 }
 
@@ -490,18 +461,12 @@ function addCharRange() {
   const end = parseHexValue(charRangeEnd.value);
 
   if (isNaN(start) || isNaN(end)) {
-    showModal.value = true;
-    modalTitle.value = '输入错误';
-    modalContent.value = '请输入有效的字符范围';
-    modalType.value = 'error';
+    addInfoMessage('请输入有效的字符范围', 'error');
     return;
   }
 
   if (start > end) {
-    showModal.value = true;
-    modalTitle.value = '输入错误';
-    modalContent.value = '起始字符不能大于结束字符';
-    modalType.value = 'error';
+    addInfoMessage('起始字符不能大于结束字符', 'error');
     return;
   }
 
@@ -653,36 +618,15 @@ async function convertFont() {
   }
 }
 
-function closeModal() {
-  showModal.value = false;
-  modalTitle.value = '';
-  modalContent.value = '';
-  modalType.value = 'info';
+function clearLog() {
+  infoMessages.value = [];
 }
 
-async function copyError() {
-  try {
-    await navigator.clipboard.writeText(modalContent.value);
-    showCopyTip.value = true;
-    setTimeout(() => showCopyTip.value = false, 1000);
-  } catch (err) {
-    console.error('复制失败：', err);
-  }
-}
-
-async function copyMessageContent(content) {
-  try {
-    await navigator.clipboard.writeText(content);
-    showCopyTip.value = true;
-    setTimeout(() => showCopyTip.value = false, 1000);
-  } catch (err) {
-    console.error('复制失败：', err);
-  }
-}
-
+let messageId = 0;
 function addInfoMessage(content, type = 'info') {
   const time = new Date().toLocaleString('zh-CN');
-  infoMessages.value.push({ time, content, type });
+  const id = ++messageId;
+  infoMessages.value.push({ id, time, content, type });
   // 限制最多显示5条信息
   if (infoMessages.value.length > 5) {
     infoMessages.value.shift();
@@ -693,6 +637,13 @@ function addInfoMessage(content, type = 'info') {
       infoMessagesRef.value.scrollTop = infoMessagesRef.value.scrollHeight;
     }
   });
+  // 5秒后自动消除
+  setTimeout(() => {
+    const idx = infoMessages.value.findIndex(m => m.id === id);
+    if (idx !== -1) {
+      infoMessages.value.splice(idx, 1);
+    }
+  }, 5000);
 }
 </script>
 

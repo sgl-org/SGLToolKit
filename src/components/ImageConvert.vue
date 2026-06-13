@@ -1585,10 +1585,12 @@ async function downloadBinResult(binData, filename) {
   }
 }
 
+let messageId = 0;
 // 添加信息消息
 function addInfoMessage(content, type = 'info') {
   const time = new Date().toLocaleString('zh-CN');
-  infoMessages.value.push({ time, content, type });
+  const id = ++messageId;
+  infoMessages.value.push({ id, time, content, type });
   // 限制最多显示5条信息
   if (infoMessages.value.length > 5) {
     infoMessages.value.shift();
@@ -1599,6 +1601,13 @@ function addInfoMessage(content, type = 'info') {
       infoMessagesRef.value.scrollTop = infoMessagesRef.value.scrollHeight;
     }
   });
+  // 5秒后自动消除
+  setTimeout(() => {
+    const idx = infoMessages.value.findIndex(m => m.id === id);
+    if (idx !== -1) {
+      infoMessages.value.splice(idx, 1);
+    }
+  }, 5000);
 }
 </script>
 
