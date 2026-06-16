@@ -8,6 +8,7 @@
     "opener:default",
     "dialog:allow-open",
     "dialog:default",
+    "shell:default",
     {
       "identifier": "fs:allow-read-text-file",
       "allow": [{ "path": "**" }]

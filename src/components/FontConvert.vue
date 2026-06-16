@@ -599,14 +599,16 @@ async function convertFont() {
         cFileContent += macroDefinitions;
         await writeTextFile(outputFullPath, cFileContent);
         console.log('已追加图标宏定义到C文件');
+        addInfoMessage('转换成功！', 'info');
       } catch (err) {
         console.error('追加宏定义失败:', err);
         const errMsg = typeof err === 'object' ? JSON.stringify(err, null, 2) : String(err);
-        addInfoMessage(`转换成功，但追加图标宏定义失败\n错误: ${errMsg}`, 'warning');
+        addInfoMessage(`追加图标宏定义失败\n错误: ${errMsg}`, 'error');
+        return;
       }
+    } else {
+      addInfoMessage('转换成功！', 'info');
     }
-    
-    addInfoMessage('转换成功！', 'info');
 
   } catch (err) {
     console.error("转换失败:", err);
