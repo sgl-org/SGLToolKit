@@ -1,0 +1,31 @@
+{
+  "name": "sgltoolkit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:csidecar && vite build",
+    "build:csidecar": "cd src\\sgl_font_conv\\source && make && copy /Y sgl_font_conv.exe ..\\..\\..\\src-tauri\\binaries\\sgl_font_conv-x86_64-pc-windows-msvc.exe",
+    "test:image-conversion": "node tests/imageConversion.test.js",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-shell": "^2",
+    "omggif": "^1.0.10",
+    "opentype.js": "^1.3.4",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "pkg": "^5.8.1",
+    "vite": "^6.0.3"
+  }
+}
