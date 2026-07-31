@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SGLToolKit V1.5",
+        "title": "SGLToolKit V1.6",
         "width": 1240,
         "height": 900
       }
@@ -23,8 +23,8 @@
   },
   "plugins": {},
   "bundle": {
-    "active": true,
-    "targets": "all",
+    "active": false,
+    "targets": [],
     "icon": [
       "icons/32x32.png",
       "icons/32x32.ico"

@@ -1,5 +1,5 @@
-CC      = gcc
-AR      = ar
+CC      = C:/Users/MLoong/scoop/apps/mingw/current/bin/gcc
+AR      = C:/Users/MLoong/scoop/apps/mingw/current/bin/ar
 CFLAGS  = -O2 -Wall -std=c99
 TARGET  = sgl_font_conv
 

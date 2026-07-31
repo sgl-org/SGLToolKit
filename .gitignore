@@ -11,6 +11,15 @@ node_modules
 dist
 dist-ssr
 *.local
+.npm-cache/
+.toolchains/
+
+# Native helper build artifacts
+src/sgl_font_conv/source/*.o
+src/sgl_font_conv/source/ft_objs/
+src/sgl_font_conv/source/libfreetype.a
+src/sgl_font_conv/source/sgl_font_conv.exe
+src/sgl_font_conv/source/-p/
 
 # Editor directories and files
 .vscode/*

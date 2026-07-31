@@ -72,6 +72,99 @@ static int find_glyph_index(const font_data_t *font, uint32_t code)
     return -1;
 }
 
+/* ---------- UTF-8 encoder ---------- */
+
+/* Encode a Unicode codepoint to UTF-8. Returns number of bytes written (1-4) */
+static int utf8_encode(uint32_t code, char buf[5])
+{
+    if (code < 0x80) {
+        buf[0] = (char)code;
+        buf[1] = '\0';
+        return 1;
+    } else if (code < 0x800) {
+        buf[0] = (char)(0xC0 | (code >> 6));
+        buf[1] = (char)(0x80 | (code & 0x3F));
+        buf[2] = '\0';
+        return 2;
+    } else if (code < 0x10000) {
+        buf[0] = (char)(0xE0 | (code >> 12));
+        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (code & 0x3F));
+        buf[3] = '\0';
+        return 3;
+    } else {
+        buf[0] = (char)(0xF0 | (code >> 18));
+        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (code & 0x3F));
+        buf[4] = '\0';
+        return 4;
+    }
+}
+
+/* Convert string to uppercase in-place */
+static void str_to_upper(char *s)
+{
+    for (; *s; s++) {
+        if (*s >= 'a' && *s <= 'z')
+            *s -= 32;
+    }
+}
+
+/* ---------- smart monospace ---------- */
+
+/* Categorize a Unicode codepoint into a script group:
+ *   0 → Latin & ASCII printable
+ *   1 → CJK (Chinese, Japanese, Korean)
+ *   2 → Cyrillic
+ *   3 → Others (fallback) */
+static int script_group(uint32_t code)
+{
+    /* Latin & ASCII printable */
+    if ((code >= 0x0020 && code <= 0x007E) ||
+        (code >= 0x00A0 && code <= 0x024F))
+        return 0;
+
+    /* CJK: Radicals, Symbols, Unified Ideographs, Compatibility */
+    if ((code >= 0x2E80 && code <= 0x9FFF) ||
+        (code >= 0xF900 && code <= 0xFAFF) ||
+        (code >= 0xFF00 && code <= 0xFFEF))
+        return 1;
+
+    /* Cyrillic */
+    if (code >= 0x0400 && code <= 0x04FF)
+        return 2;
+
+    /* Others */
+    return 3;
+}
+
+/* Apply smart monospace: each script group gets its own max width as the
+ * uniform advance width, and glyphs are centered within it. */
+static void apply_smart_mono(font_data_t *font)
+{
+    size_t max_box_w[4] = {0, 0, 0, 0};
+
+    /* First pass: find max box_w per group */
+    for (size_t i = 0; i < font->glyph_count; i++) {
+        int g = script_group(font->glyphs[i].code);
+        int bw = font->glyphs[i].box_w;
+        if (bw > (int)max_box_w[g])
+            max_box_w[g] = (size_t)bw;
+    }
+
+    /* Second pass: set uniform adv_w and center ofs_x */
+    for (size_t i = 0; i < font->glyph_count; i++) {
+        int g = script_group(font->glyphs[i].code);
+        int mw = (int)max_box_w[g];
+        font->glyphs[i].adv_w = mw * 16;
+        if (font->glyphs[i].box_w > 0)
+            font->glyphs[i].ofs_x = (mw - font->glyphs[i].box_w) / 2;
+        else
+            font->glyphs[i].ofs_x = 0;
+    }
+}
+
 /* ---------- writer ---------- */
 
 /* Per-glyph compiled data */
@@ -97,6 +190,18 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
             &font->glyphs[i], ctx->bpp, ctx->compress, &compiled[i].bitmap_len);
         compiled[i].bitmap_offset = total_bitmap_size;
         total_bitmap_size += compiled[i].bitmap_len;
+    }
+
+    /* ---- Phase 1.5: smart monospace ---- */
+    if (ctx->smart_mono) {
+        apply_smart_mono((font_data_t *)font);  /* cast away const, safe here */
+    }
+
+    /* ---- Phase 1.6: apply character spacing ---- */
+    if (ctx->spacing > 0) {
+        for (size_t i = 0; i < glyph_count; i++) {
+            ((font_data_t *)font)->glyphs[i].adv_w += ctx->spacing * 16;
+        }
     }
 
     /* ---- Phase 2: write C file header ---- */
@@ -125,6 +230,32 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, " */\n\n");
     fprintf(fp, "#include <sgl_core.h>\n");
     fprintf(fp, "#include <sgl_font.h>\n\n");
+    fprintf(fp, "/*\n");
+    {
+        int col = 0;
+        for (size_t i = 0; i < glyph_count; i++) {
+            uint32_t code = font->glyphs[i].code;
+            /* Skip non-displayable control characters */
+            if (code < 0x20 || (code >= 0x7F && code <= 0x9F)) continue;
+            char utf8_buf[5];
+            utf8_encode(code, utf8_buf);
+            fprintf(fp, "%s", utf8_buf);
+            col++;
+            if (col % 32 == 0) fprintf(fp, "\n");
+        }
+        if (col % 32 != 0) fprintf(fp, "\n");
+    }
+    fprintf(fp, "*/\n\n");
+
+    /* Build macro name: CONFIG_SGL_FONT_<UPPER_FONT_NAME> */
+    char macro_name[256];
+    snprintf(macro_name, sizeof(macro_name), "CONFIG_SGL_FONT_%s", ctx->font_name);
+    str_to_upper(macro_name);
+
+    fprintf(fp, "#ifndef %s\n", macro_name);
+    fprintf(fp, "#define %s 1\n", macro_name);
+    fprintf(fp, "#endif\n\n");
+    fprintf(fp, "#if %s\n\n", macro_name);
 
     /* ---- Phase 3: write font_bitmap[] ---- */
     fprintf(fp, "static const uint8_t font_bitmap[] = {\n");
@@ -282,6 +413,9 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, "    .unicode = font_unicode,\n");
     fprintf(fp, "    .unicode_num = SGL_ARRAY_SIZE(font_unicode),\n");
     fprintf(fp, "};\n");
+
+    /* Build macro name again for the closing #endif (macro_name is still in scope) */
+    fprintf(fp, "\n#endif /* %s */\n", macro_name);
 
     /* Cleanup */
     for (size_t i = 0; i < glyph_count; i++) {

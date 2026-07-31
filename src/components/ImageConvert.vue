@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="converter-form">
-      
+
       <!-- 图片文件输入栏 -->
       <div class="form-section">
         <button class="add-image-btn" @click="selectImageFile">添加图片</button>
@@ -14,9 +14,9 @@
             图片预览 (双击分辨率可编辑大小)
             <span v-if="imageFiles.length > 0" class="size-info">(总大小: {{ formatBytes(totalOriginalSize) }})</span>
           </div>
-          <button 
-            v-if="imageFiles.length > 0" 
-            class="clear-all-btn" 
+          <button
+            v-if="imageFiles.length > 0"
+            class="clear-all-btn"
             @click="clearAllImages"
           >
             全部清除
@@ -24,8 +24,8 @@
         </div>
         <div class="image-preview-container">
           <div v-if="imageFiles.length > 0" class="preview-grid">
-            <div 
-              v-for="(image, index) in imageFiles" 
+            <div
+              v-for="(image, index) in imageFiles"
               :key="index"
               class="preview-item"
             >
@@ -38,10 +38,10 @@
                     <span class="resolution-height" @dblclick="startEditingResolution(index, 'height')">{{ image.height }}</span>
                   </div>
                   <div class="resolution-input" v-else>
-                    <input 
-                      v-if="editingResolutionField === 'width'" 
-                      type="number" 
-                      :value="image.width" 
+                    <input
+                      v-if="editingResolutionField === 'width'"
+                      type="number"
+                      :value="image.width"
                       @input="updateResolution(index, 'width', $event.target.value)"
                       @blur="stopEditingResolution"
                       @keydown.enter="stopEditingResolution"
@@ -52,10 +52,10 @@
                     />
                     <span v-else>{{ image.width }}</span>
                     <span class="resolution-separator">×</span>
-                    <input 
-                      v-if="editingResolutionField === 'height'" 
-                      type="number" 
-                      :value="image.height" 
+                    <input
+                      v-if="editingResolutionField === 'height'"
+                      type="number"
+                      :value="image.height"
                       @input="updateResolution(index, 'height', $event.target.value)"
                       @blur="stopEditingResolution"
                       @keydown.enter="stopEditingResolution"
@@ -128,8 +128,8 @@
       <div class="form-section">
         <div class="settings-row">
           <div class="setting-item">
-            <label class="form-label">数组名</label>
-            <input v-model="arrayName" type="text" class="form-input" placeholder="输入数组名">
+            <label class="form-label">输出文件名</label>
+            <input v-model="arrayName" type="text" class="form-input" placeholder="输出文件名">
           </div>
           <div class="setting-item">
             <label class="form-label">输出文件夹</label>
@@ -160,9 +160,9 @@
 
       <!-- 转换按钮 -->
       <div class="form-actions">
-        <button 
-          class="convert-btn" 
-          @click="convertImage" 
+        <button
+          class="convert-btn"
+          @click="convertImage"
           :disabled="!canConvert || isConverting"
         >
           {{ isConverting ? '转换中...' : '开始转换' }}
@@ -199,31 +199,32 @@
     <div v-if="conversionResults.length > 0" class="result-section">
       <h4>转换结果</h4>
       <div class="result-container">
-        <div 
-          v-for="(result, index) in conversionResults" 
+        <div
+          v-for="(result, index) in conversionResults"
           :key="index"
           class="result-item"
         >
           <div class="result-header">
             <span class="result-name">{{ result.name }}</span>
             <div class="result-actions">
-              <button 
+              <button
+                v-if="result.kind !== 'bin'"
                 class="copy-result-btn"
-                @click="copyResult(result.code)"
+                @click="copyResult(result)"
                 title="复制代码"
               >
                 复制
               </button>
-              <button 
+              <button
                 class="download-result-btn"
-                @click="result.binData ? downloadBinResult(result.binData, result.name) : downloadResult(result.code, result.name)"
+                @click="downloadResult(result)"
                 title="下载文件"
               >
                 下载
               </button>
             </div>
           </div>
-          <pre class="result-code">{{ result.code }}</pre>
+          <pre v-if="result.kind !== 'bin'" class="result-code">{{ result.displayCode || result.code }}</pre>
         </div>
       </div>
     </div>
@@ -232,15 +233,15 @@
     <div class="info-bar">
       <h4>LOG信息</h4>
       <div class="info-messages" ref="infoMessagesRef">
-        <div 
-          v-for="(msg, index) in infoMessages" 
+        <div
+          v-for="(msg, index) in infoMessages"
           :key="index"
           :class="['info-message', msg.type]"
         >
           <span class="msg-time">{{ msg.time }}</span>
           <span class="msg-content">{{ msg.content }}</span>
-          <button 
-            v-if="msg.type === 'error'" 
+          <button
+            v-if="msg.type === 'error'"
             class="copy-msg-btn"
             @click="copyMessageContent(msg.content)"
             title="复制内容"
@@ -259,8 +260,17 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
+import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
+import {
+  ConversionCancelledError,
+  collectCCode,
+  convertImages,
+  createBinaryChunks,
+  createCCodeChunks,
+  createImageThumbnail,
+  releasePreviewUrls
+} from '../utils/imageConversion';
 
 // 响应式数据
 const imageFiles = ref([]);
@@ -269,7 +279,7 @@ const outputFormat = ref('c');
 const compression = ref('none');
 const enableTransparentFill = ref(true);
 const transparentFillColor = ref('#FFFFFF');
-const arrayName = ref('sgl_image');
+const arrayName = ref('img_xxx');
 const outputFolder = ref('');
 const binStartAddress = ref('0x0000');
 const combineAsArray = ref(true);
@@ -277,12 +287,12 @@ const combineAsArray = ref(true);
 // 监听binStartAddress变化，自动添加0x前缀并验证是否为合法十六进制
 watch(binStartAddress, (newValue) => {
   let trimmedValue = newValue.trim();
-  
+
   // 确保以0x开头
   if (trimmedValue && !trimmedValue.startsWith('0x')) {
     trimmedValue = '0x' + trimmedValue;
   }
-  
+
   // 清理非法字符，只保留0-9, A-F, a-f
   if (trimmedValue) {
     // 保留0x前缀，只清理后面的部分
@@ -291,7 +301,7 @@ watch(binStartAddress, (newValue) => {
     const cleanedHexPart = hexPart.replace(/[^0-9A-Fa-f]/g, '');
     trimmedValue = prefix + cleanedHexPart;
   }
-  
+
   // 更新输入值
   binStartAddress.value = trimmedValue;
 });
@@ -302,6 +312,23 @@ const infoMessagesRef = ref(null);
 const showCopyTip = ref(false);
 const conversionResults = ref([]);
 const conversionPreviews = ref([]);
+
+const MAX_IMAGE_PIXELS = 16 * 1024 * 1024;
+const MAX_TOTAL_OUTPUT_BYTES = 256 * 1024 * 1024;
+const MAX_PREVIEW_PIXELS = 1024 * 1024;
+const MAX_COPY_CODE_BYTES = 1024 * 1024;
+const CODE_WRITE_CHUNK_SIZE = 128 * 1024;
+let conversionRunId = 0;
+
+function cancelPendingConversion() {
+  conversionRunId += 1;
+}
+
+function clearConversionOutput() {
+  releasePreviewUrls(conversionPreviews.value);
+  conversionPreviews.value = [];
+  conversionResults.value = [];
+}
 
 // 分辨率编辑相关
 const editingResolutionIndex = ref(-1);
@@ -314,7 +341,7 @@ function loadSettings() {
     // 重置透明填充相关设置
     enableTransparentFill.value = true;
     transparentFillColor.value = '#FFFFFF';
-    
+
     const savedSettings = localStorage.getItem('sgltoolkit-settings');
     if (savedSettings) {
       const settings = JSON.parse(savedSettings);
@@ -357,16 +384,21 @@ function saveSettings() {
 }
 
 // 监听设置变化
-watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes], async () => {
+watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes], (current, previous) => {
   saveSettings();
-  
-  // 当颜色格式或压缩算法改变时，重新生成预览
-  if (imageFiles.value.length > 0) {
-    const previewPromises = imageFiles.value.map(image => generatePreview(image));
-    const previews = await Promise.all(previewPromises);
-    conversionPreviews.value = previews;
+
+  // 像素格式变化会使已有结果失效。只清理旧结果，不在后台重复解码所有图片。
+  const pixelSettingsChanged = previous && (
+    current[0] !== previous[0]
+    || current[2] !== previous[2]
+    || current[3] !== previous[3]
+    || current[4] !== previous[4]
+  );
+  if (pixelSettingsChanged) {
+    cancelPendingConversion();
+    clearConversionOutput();
   }
-}, { deep: true });
+});
 
 // 初始化时加载设置
 loadSettings();
@@ -414,41 +446,39 @@ async function selectImageFile() {
         { name: '所有文件', extensions: ['*'] }
       ]
     });
-    
+
     if (selected) {
+      cancelPendingConversion();
+      clearConversionOutput();
       const files = Array.isArray(selected) ? selected : [selected];
-      
+
       for (const filePath of files) {
         addInfoMessage(`已选择图片文件: ${filePath}`, 'info');
-        
+
         try {
-          const base64Data = await invoke('read_file_as_base64', { path: filePath });
-          
-          const binaryString = atob(base64Data);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-          const blob = new Blob([bytes], { type: 'image/*' });
-          const url = URL.createObjectURL(blob);
-          
+          const thumbnail = await createImageThumbnail(
+            filePath,
+            readFile,
+            MAX_IMAGE_PIXELS,
+            MAX_PREVIEW_PIXELS
+          );
+
           const imageInfo = {
             path: filePath,
-            previewUrl: url,
+            previewUrl: thumbnail.url,
             name: filePath.split(/[/\\]/).pop() || '未命名',
-            width: 0,
-            height: 0
+            width: thumbnail.width,
+            height: thumbnail.height
           };
-          
+
           const index = imageFiles.value.length;
           imageFiles.value.push(imageInfo);
-          
-          const img = new Image();
-          img.onload = () => {
-            imageFiles.value[index].width = img.naturalWidth;
-            imageFiles.value[index].height = img.naturalHeight;
-          };
-          img.src = url;
+
+          // 第一张图片自动生成输出文件名
+          if (index === 0) {
+            updateOutputFileNameFromFirstImage(imageInfo.name);
+          }
+
         } catch (previewErr) {
           console.error('生成预览失败：', previewErr);
           addInfoMessage(`生成预览失败: ${previewErr.message || JSON.stringify(previewErr)}`, 'error');
@@ -469,7 +499,7 @@ async function selectOutputFolder() {
       multiple: false,
       title: '选择输出文件夹'
     });
-    
+
     if (selected) {
       const folderPath = Array.isArray(selected) ? selected[0] : selected;
       outputFolder.value = folderPath;
@@ -483,828 +513,90 @@ async function selectOutputFolder() {
 
 // 删除图片
 function removeImage(index) {
+  cancelPendingConversion();
+  clearConversionOutput();
   if (imageFiles.value[index] && imageFiles.value[index].previewUrl) {
     URL.revokeObjectURL(imageFiles.value[index].previewUrl);
   }
   imageFiles.value.splice(index, 1);
+  // 如果删的是第一张且还有其他图片，重新生成输出文件名
+  if (index === 0 && imageFiles.value.length > 0) {
+    updateOutputFileNameFromFirstImage(imageFiles.value[0].name);
+  }
 }
 
 // 清除所有图片
 function clearAllImages() {
+  cancelPendingConversion();
   for (const image of imageFiles.value) {
     if (image.previewUrl) {
       URL.revokeObjectURL(image.previewUrl);
     }
   }
   imageFiles.value = [];
-  // 清除预览数据
-  conversionPreviews.value = [];
-  // 清除转换结果
-  conversionResults.value = [];
-  // 清空缓存
-  imageDataCache.clear();
-  // 释放所有内存缓冲区
-  freeAllMemoryBuffers();
-  // 清空画布池
-  canvasPool.canvases = [];
+  clearConversionOutput();
+  // 重置文件名
+  arrayName.value = 'img_xxx';
 }
 
-// 生成转换后预览
-async function generatePreview(image) {
-  return new Promise((resolve, reject) => {
-    // 首先获取转换后的像素数据
-    getImagePixelData(image).then(bitmapData => {
-      const format = colorFormat.value;
-      const width = image.width || 32;
-      const height = image.height || 32;
-      const bytesPerPixel = getBytesPerPixel(format);
-      
-      // 创建画布
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      const imageData = ctx.createImageData(width, height);
-      const data = imageData.data;
-      
-      // 将转换后的像素数据转换回RGBA格式
-      let offset = 0;
-      let pixelCount = 0;
-      
-      // 检查是否是RLE压缩数据
-      if (compression.value === 'rle') {
-        // 解压RLE数据
-        let i = 0;
-        while (i < bitmapData.length && pixelCount < width * height) {
-          const count = bitmapData[i];
-          i++;
-          
-          let r, g, b, a = 255;
-          
-          switch (format) {
-            case 'RGB888':
-              // RGB888: 按 B, G, R 顺序（小端序）
-              b = bitmapData[i];
-              g = bitmapData[i + 1];
-              r = bitmapData[i + 2];
-              i += 3;
-              break;
-            case 'RGB565':
-              // RGB565: 5 bits R, 6 bits G, 5 bits B（小端序）
-              const rgb565 = bitmapData[i] | (bitmapData[i + 1] << 8);
-              r = ((rgb565 >> 11) & 0x1F) << 3;
-              g = ((rgb565 >> 5) & 0x3F) << 2;
-              b = (rgb565 & 0x1F) << 3;
-              i += 2;
-              break;
-            case 'RGB332':
-              // RGB332: 3 bits R, 3 bits G, 2 bits B
-              const rgb332 = bitmapData[i];
-              r = ((rgb332 >> 5) & 0x07) << 5;
-              g = ((rgb332 >> 2) & 0x07) << 5;
-              b = (rgb332 & 0x03) << 6;
-              i += 1;
-              break;
-            case 'ARGB8888':
-              // ARGB8888: 按 B, G, R, A 顺序（小端序）
-              b = bitmapData[i];
-              g = bitmapData[i + 1];
-              r = bitmapData[i + 2];
-              a = bitmapData[i + 3];
-              i += 4;
-              break;
-            case 'ARGB4444':
-              // ARGB4444: 4 bits each
-              const argb4444 = bitmapData[i] | (bitmapData[i + 1] << 8);
-              a = ((argb4444 >> 12) & 0x0F) << 4;
-              r = ((argb4444 >> 8) & 0x0F) << 4;
-              g = ((argb4444 >> 4) & 0x0F) << 4;
-              b = (argb4444 & 0x0F) << 4;
-              i += 2;
-              break;
-            case 'ARGB2222':
-              // ARGB2222: 2 bits each
-              const argb2222 = bitmapData[i];
-              a = ((argb2222 >> 6) & 0x03) << 6;
-              r = ((argb2222 >> 4) & 0x03) << 6;
-              g = ((argb2222 >> 2) & 0x03) << 6;
-              b = (argb2222 & 0x03) << 6;
-              i += 1;
-              break;
-            default:
-              // 默认使用RGB888
-              r = bitmapData[i];
-              g = bitmapData[i + 1];
-              b = bitmapData[i + 2];
-              i += 3;
-          }
-          
-          // 写入多个相同的像素
-          for (let j = 0; j < count && pixelCount < width * height; j++) {
-            const pixelIndex = pixelCount * 4;
-            data[pixelIndex] = r;
-            data[pixelIndex + 1] = g;
-            data[pixelIndex + 2] = b;
-            data[pixelIndex + 3] = a;
-            pixelCount++;
-          }
-        }
-      } else {
-        // 非压缩数据
-        while (offset < bitmapData.length && pixelCount < width * height) {
-          let r, g, b, a = 255;
-          
-          switch (format) {
-            case 'RGB888':
-              // RGB888: 按 B, G, R 顺序（小端序）
-              b = bitmapData[offset];
-              g = bitmapData[offset + 1];
-              r = bitmapData[offset + 2];
-              offset += 3;
-              break;
-            case 'RGB565':
-              // RGB565: 5 bits R, 6 bits G, 5 bits B（小端序）
-              const rgb565 = bitmapData[offset] | (bitmapData[offset + 1] << 8);
-              r = ((rgb565 >> 11) & 0x1F) << 3;
-              g = ((rgb565 >> 5) & 0x3F) << 2;
-              b = (rgb565 & 0x1F) << 3;
-              offset += 2;
-              break;
-            case 'RGB332':
-              // RGB332: 3 bits R, 3 bits G, 2 bits B
-              const rgb332 = bitmapData[offset];
-              r = ((rgb332 >> 5) & 0x07) << 5;
-              g = ((rgb332 >> 2) & 0x07) << 5;
-              b = (rgb332 & 0x03) << 6;
-              offset += 1;
-              break;
-            case 'ARGB8888':
-              // ARGB8888: 按 B, G, R, A 顺序（小端序）
-              b = bitmapData[offset];
-              g = bitmapData[offset + 1];
-              r = bitmapData[offset + 2];
-              a = bitmapData[offset + 3];
-              offset += 4;
-              break;
-            case 'ARGB4444':
-              // ARGB4444: 4 bits each
-              const argb4444 = bitmapData[offset] | (bitmapData[offset + 1] << 8);
-              a = ((argb4444 >> 12) & 0x0F) << 4;
-              r = ((argb4444 >> 8) & 0x0F) << 4;
-              g = ((argb4444 >> 4) & 0x0F) << 4;
-              b = (argb4444 & 0x0F) << 4;
-              offset += 2;
-              break;
-            case 'ARGB2222':
-              // ARGB2222: 2 bits each
-              const argb2222 = bitmapData[offset];
-              a = ((argb2222 >> 6) & 0x03) << 6;
-              r = ((argb2222 >> 4) & 0x03) << 6;
-              g = ((argb2222 >> 2) & 0x03) << 6;
-              b = (argb2222 & 0x03) << 6;
-              offset += 1;
-              break;
-            default:
-              // 默认使用RGB888
-              r = bitmapData[offset];
-              g = bitmapData[offset + 1];
-              b = bitmapData[offset + 2];
-              offset += 3;
-          }
-          
-          // 写入RGBA数据
-          const pixelIndex = pixelCount * 4;
-          data[pixelIndex] = r;
-          data[pixelIndex + 1] = g;
-          data[pixelIndex + 2] = b;
-          data[pixelIndex + 3] = a;
-          pixelCount++;
-        }
-      }
-      
-      // 绘制到画布
-      ctx.putImageData(imageData, 0, 0);
-      const previewUrl = canvas.toDataURL('image/png');
-      
-      // 计算字节大小和压缩率
-      const originalSize = width * height * bytesPerPixel;
-      const compressedSize = bitmapData.length;
-      const compressionRatio = originalSize > 0 ? ((originalSize - compressedSize) / originalSize * 100).toFixed(1) : 0;
-      
-      resolve({
-        name: image.name,
-        url: previewUrl,
-        width: width,
-        height: height,
-        originalSize: originalSize,
-        compressedSize: compressedSize,
-        compressionRatio: compressionRatio
-      });
-    }).catch(err => {
-      reject(err);
-    });
-  });
+// 根据第一张图片更新输出文件名
+function updateOutputFileNameFromFirstImage(fileName) {
+  const rawName = fileName.replace(/\.[^/.]+$/, '');
+  const safeName = rawName.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
+  arrayName.value = `img_${safeName}` || 'img_xxx';
 }
 
 // 转换图片
 async function convertImage() {
   if (!canConvert.value || isConverting.value) return;
 
+  const runId = ++conversionRunId;
+  const images = imageFiles.value.map(({ path, name, width, height }) => ({ path, name, width, height }));
+  const settings = {
+    format: colorFormat.value,
+    outputFormat: outputFormat.value,
+    compression: compression.value,
+    enableTransparentFill: enableTransparentFill.value,
+    transparentFillColor: transparentFillColor.value,
+    arrayName: arrayName.value,
+    binStartAddress: binStartAddress.value,
+    combineAsArray: combineAsArray.value,
+    swapBytes: swapBytes.value
+  };
+  let converted = null;
+  let published = false;
+
   isConverting.value = true;
-  conversionResults.value = [];
-  conversionPreviews.value = [];
+  clearConversionOutput();
 
   try {
     addInfoMessage('开始转换图片...', 'info');
-    
-    // 生成预览
-    const previewPromises = imageFiles.value.map(image => generatePreview(image));
-    const previews = await Promise.all(previewPromises);
-    conversionPreviews.value = previews;
-    
-    // 存储所有bitmap数据，用于生成bin文件
-    let combinedBitmap = new Uint8Array(0);
-    
-    // 存储所有pixmap信息，用于生成结构体
-    const pixmapInfos = [];
-    
-    // 先生成所有bitmap数据
-    const results = await Promise.all(imageFiles.value.map(async (image) => {
-      addInfoMessage(`正在转换: ${image.name}`, 'info');
-      
-      // 获取图片的实际像素数据
-      const bitmapData = await getImagePixelData(image);
-      const width = image.width || 32;
-      const height = image.height || 32;
-      
-      // 生成bitmap数组
-      const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
-      const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-      const bitmapName = `${safeFilename}_bitmap`;
-      
-      return {
-        safeFilename: safeFilename,
-        width: width,
-        height: height,
-        bitmapName: bitmapName,
-        bitmapData: bitmapData
-      };
-    }));
-    
-    // 处理结果并构建combinedBitmap
-    for (const result of results) {
-      // 存储pixmap信息
-      pixmapInfos.push({
-        name: result.safeFilename,
-        width: result.width,
-        height: result.height,
-        bitmapName: result.bitmapName,
-        bitmapData: result.bitmapData
-      });
-      
-      // 将bitmap数据添加到组合数组中（用于生成bin文件）
-      // 创建新的Uint8Array，包含原有数据和新数据
-      const newSize = combinedBitmap.length + result.bitmapData.length;
-      const newCombinedBitmap = new Uint8Array(newSize);
-      newCombinedBitmap.set(combinedBitmap, 0);
-      newCombinedBitmap.set(result.bitmapData, combinedBitmap.length);
-      combinedBitmap = newCombinedBitmap;
-    }
-    
-    // 如果是bin文件输出格式，生成bin文件
-    if (outputFormat.value === 'bin') {
-      // 生成bin文件数据（用于下载）
-      const binData = new Uint8Array(combinedBitmap);
-      
-      // 获取数组名，用于命名bin文件和结构体文件
-      const arrayNameValue = arrayName.value || 'flash_image';
-      
-      // 添加bin文件下载选项
-      conversionResults.value.push({
-        name: `${arrayNameValue}.bin`,
-        code: '',
-        binData: binData,
-        binSize: binData.length
-      });
-      
-      // 生成包含地址信息的sgl_pixmap_t结构体
-      let binCode = `#include <stdint.h>\n`;
-      binCode += `#include <sgl_core.h>\n\n`;
-      
-      // 获取用户指定的起始地址偏移，自动添加0x前缀并验证
-      let addressValue = binStartAddress.value.trim();
-      if (addressValue && !addressValue.startsWith('0x')) {
-        addressValue = '0x' + addressValue;
-      }
-      
-      // 验证是否为合法的十六进制值
-      let startAddress = 0;
-      const hexPattern = /^0x[0-9A-Fa-f]+$/;
-      if (addressValue && hexPattern.test(addressValue)) {
-        startAddress = parseInt(addressValue, 16);
-      } else if (addressValue) {
-        // 非法十六进制值，使用默认值0并显示错误信息
-        addInfoMessage('BIN格式起始地址格式错误，已使用默认值0', 'error');
-        startAddress = 0;
-      }
-      let currentAddress = startAddress;
-      
-      // 存储所有生成的pixmap信息
-      const pixmapInfosForArray = [];
-      
-      // 生成每个图片的sgl_pixmap_t结构体信息
-      for (const info of pixmapInfos) {
-        pixmapInfosForArray.push({
-          width: info.width,
-          height: info.height,
-          address: currentAddress,
-          format: getSGLFormat(colorFormat.value, compression.value)
-        });
-        
-        // 如果没有勾选"组合为数组"，生成单独的sgl_pixmap_t结构体
-        if (!combineAsArray.value) {
-          const pixmapName = `${info.name}_image`;
-          binCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
-          binCode += `    .width = ${info.width},\n`;
-          binCode += `    .height = ${info.height},\n`;
-          binCode += `    .bitmap.addr = 0x${currentAddress.toString(16).padStart(8, '0')},\n`;
-          binCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
-          binCode += `};\n\n`;
-        }
-        
-        // 更新当前地址
-        currentAddress += info.bitmapData.length;
-      }
-      
-      // 如果勾选了"组合为数组"，生成一个包含所有pixmap的数组
-      if (combineAsArray.value) {
-        binCode += `const sgl_pixmap_t ${arrayNameValue}[${pixmapInfosForArray.length}] = {\n`;
-        for (const info of pixmapInfosForArray) {
-          binCode += `    {\n`;
-          binCode += `        .width = ${info.width},\n`;
-          binCode += `        .height = ${info.height},\n`;
-          binCode += `        .bitmap.addr = 0x${info.address.toString(16).padStart(8, '0')},\n`;
-          binCode += `        .format = ${info.format},\n`;
-          binCode += `    },\n`;
-        }
-        binCode += `};\n\n`;
-      }
-      
-      // 添加到结果数组
-      conversionResults.value.push({
-        name: `${arrayNameValue}.c`,
-        code: binCode
-      });
-    } else {
-      // 非bin文件格式，生成C代码
-      let combinedCode = '';
-      let resultName = '';
-      
-      if (combineAsArray.value && imageFiles.value.length > 1) {
-        // 生成组合数组
-        combinedCode = await generateCombinedArray();
-        // 使用数组名输入框的值作为结果名称
-        resultName = arrayName.value || 'combined_array';
-      } else {
-        // 为每张图片生成代码并合并，确保所有bitmap在前面，所有sgl_pixmap_t在后面
-        resultName = 'combined_results';
-        
-        // 添加include头文件（只添加一份）
-        combinedCode = `#include <stdint.h>\n`;
-        combinedCode += `#include <sgl_core.h>\n\n`;
-        
-        // 先生成所有bitmap数组
-        for (const info of pixmapInfos) {
-          const totalBytes = info.bitmapData.length;
-          
-          // 生成bitmap数组代码
-          let bitmapCode = '';
-          // 添加压缩算法注释
-          if (compression.value === 'rle') {
-            bitmapCode += `// RLE压缩数据\n`;
-          }
-          
-          bitmapCode += `static const uint8_t ${info.bitmapName}[${totalBytes}] = {\n`;
-          
-          let line = '    ';
-          for (let j = 0; j < info.bitmapData.length; j++) {
-            line += `0x${info.bitmapData[j].toString(16).padStart(2, '0')}`;
-            if (j < info.bitmapData.length - 1) {
-              line += ', ';
-            }
-            
-            // 每24个字节换行
-            if ((j + 1) % 24 === 0 && j < info.bitmapData.length - 1) {
-              bitmapCode += line + '\n';
-              line = '    ';
-            }
-          }
-          
-          if (line.trim()) {
-            bitmapCode += line + '\n';
-          }
-          bitmapCode += `};\n\n`;
-          
-          // 添加bitmap数组代码
-          combinedCode += bitmapCode;
-        }
-        
-        // 最后生成所有sgl_pixmap_t结构体
-        for (const info of pixmapInfos) {
-          const pixmapName = `${info.name}_image`;
-          combinedCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
-          combinedCode += `    .width = ${info.width},\n`;
-          combinedCode += `    .height = ${info.height},\n`;
-          combinedCode += `    .bitmap.array = ${info.bitmapName},\n`;
-          combinedCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
-          combinedCode += `};\n\n`;
-        }
-      }
-      
-      // 添加到结果数组
-      conversionResults.value.push({
-        name: resultName,
-        code: combinedCode
-      });
-    }
-    
-    addInfoMessage('转换成功！', 'info');
-    isConverting.value = false;
-
-  } catch (err) {
-    console.error('转换失败:', err);
-    addInfoMessage(`转换失败：${String(err)}`, 'error');
-    isConverting.value = false;
-  }
-}
-
-// 生成C语言数组
-async function generateCArray(image, index) {
-  // 获取图片的实际像素数据
-  const bitmapData = await getImagePixelData(image);
-  const width = image.width || 32;
-  const height = image.height || 32;
-  const bytesPerPixel = getBytesPerPixel(colorFormat.value);
-  const totalBytes = bitmapData.length;
-  
-  // 生成C代码
-  let cCode = `#include <stdint.h>\n`;
-  cCode += `#include <sgl_core.h>\n\n`;
-  
-  // 生成bitmap数组
-  const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
-  const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-  const bitmapName = `${safeFilename}_bitmap`;
-  
-  // 添加压缩算法注释
-  if (compression.value === 'rle') {
-    cCode += `// RLE压缩数据\n`;
-  }
-  
-  cCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
-  
-  let line = '    ';
-  for (let i = 0; i < bitmapData.length; i++) {
-    line += `0x${bitmapData[i].toString(16).padStart(2, '0')}`;
-    if (i < bitmapData.length - 1) {
-      line += ', ';
-    }
-    
-    // 每24个字节换行
-    if ((i + 1) % 24 === 0 && i < bitmapData.length - 1) {
-      cCode += line + '\n';
-      line = '    ';
-    }
-  }
-  
-  if (line.trim()) {
-    cCode += line + '\n';
-  }
-  cCode += `};\n\n`;
-  
-  // 生成sgl_pixmap_t结构
-  const pixmapName = combineAsArray.value ? (arrayName.value || `${safeFilename}_image`) : `${safeFilename}_image`;
-  cCode += `const sgl_pixmap_t ${pixmapName} = {\n`;
-  cCode += `    .width = ${width},\n`;
-  cCode += `    .height = ${height},\n`;
-  cCode += `    .bitmap.array = ${bitmapName},\n`;
-  cCode += `    .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
-  cCode += `};\n`;
-  
-  return cCode;
-}
-
-// 生成组合数组
-async function generateCombinedArray() {
-  // 生成C代码
-  let cCode = `#include <stdint.h>\n`;
-  cCode += `#include <sgl_core.h>\n\n`;
-  
-  // 为每张图片生成bitmap数组
-  const bitmapNames = [];
-  const pixmapInfos = [];
-  
-  for (let i = 0; i < imageFiles.value.length; i++) {
-    const image = imageFiles.value[i];
-    
-    // 获取图片的实际像素数据
-    const bitmapData = await getImagePixelData(image);
-    const width = image.width || 32;
-    const height = image.height || 32;
-    const totalBytes = bitmapData.length;
-    
-    // 生成bitmap数组
-    const filenameWithoutExt = image.name.replace(/\.[^/.]+$/, '');
-    const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-    const bitmapName = `${safeFilename}_bitmap`;
-    bitmapNames.push(bitmapName);
-    
-    pixmapInfos.push({
-      width: width,
-      height: height,
-      bitmapName: bitmapName
+    converted = await convertImages(images, settings, {
+      readBytes: readFile,
+      maxImagePixels: MAX_IMAGE_PIXELS,
+      maxTotalOutputBytes: MAX_TOTAL_OUTPUT_BYTES,
+      maxPreviewPixels: MAX_PREVIEW_PIXELS,
+      isCancelled: () => runId !== conversionRunId,
+      onProgress: (image) => addInfoMessage(`正在转换: ${image.name}`, 'info')
     });
-    
-    // 添加压缩算法注释
-    if (compression.value === 'rle') {
-      cCode += `// RLE压缩数据\n`;
-    }
-    
-    cCode += `static const uint8_t ${bitmapName}[${totalBytes}] = {\n`;
-    
-    let line = '    ';
-    for (let j = 0; j < bitmapData.length; j++) {
-      line += `0x${bitmapData[j].toString(16).padStart(2, '0')}`;
-      if (j < bitmapData.length - 1) {
-        line += ', ';
-      }
-      
-      // 每24个字节换行
-      if ((j + 1) % 24 === 0 && j < bitmapData.length - 1) {
-        cCode += line + '\n';
-        line = '    ';
-      }
-    }
-    
-    if (line.trim()) {
-      cCode += line + '\n';
-    }
-    cCode += `};\n\n`;
-  }
-  
-  // 生成组合数组
-  const arrayNameValue = arrayName.value || 'combined_images';
-  const imageCount = imageFiles.value.length;
-  
-  cCode += `const sgl_pixmap_t ${arrayNameValue}[${imageCount}] = {\n`;
-  
-  for (let i = 0; i < pixmapInfos.length; i++) {
-    const info = pixmapInfos[i];
-    
-    cCode += `    {\n`;
-    cCode += `        .width = ${info.width},\n`;
-    cCode += `        .height = ${info.height},\n`;
-    cCode += `        .bitmap.array = ${info.bitmapName},\n`;
-    cCode += `        .format = ${getSGLFormat(colorFormat.value, compression.value)},\n`;
-    cCode += `    }`;
-    
-    if (i < pixmapInfos.length - 1) {
-      cCode += ',';
-    }
-    cCode += '\n';
-  }
-  
-  cCode += `};\n`;
-  
-  return cCode;
-}
 
-// 获取图片的像素数据
-function getImagePixelData(image) {
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-    
-    img.onload = () => {
-      // 获取目标宽度和高度
-      const targetWidth = image.width || img.naturalWidth;
-      const targetHeight = image.height || img.naturalHeight;
-      
-      // 设置画布大小为目标大小
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      
-      // 使用双三次插值算法进行缩放
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-      
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      const bitmapData = [];
-      
-      // 根据颜色格式转换像素数据
-      const format = colorFormat.value;
-      
-      for (let i = 0; i < data.length; i += 4) {
-        let r = data[i];
-        let g = data[i + 1];
-        let b = data[i + 2];
-        const a = data[i + 3];
-        
-        // 处理透明像素
-        if (a < 255 && enableTransparentFill.value) {
-          // 使用透明填充颜色
-          const fillColor = parseColor(transparentFillColor.value);
-          if (fillColor) {
-            // 计算透明度因子
-            const alphaFactor = a / 255;
-            // 混色算法：原始颜色 * 透明度 + 填充颜色 * (1 - 透明度)
-            r = Math.round(r * alphaFactor + fillColor.r * (1 - alphaFactor));
-            g = Math.round(g * alphaFactor + fillColor.g * (1 - alphaFactor));
-            b = Math.round(b * alphaFactor + fillColor.b * (1 - alphaFactor));
-          }
-        }
-        
-        // 根据颜色格式转换
-        switch (format) {
-          case 'RGB888':
-            // RGB888: 按 B, G, R 顺序（小端序）
-            bitmapData.push(b, g, r);
-            break;
-          case 'RGB565':
-            // RGB565: 5 bits R, 6 bits G, 5 bits B（小端序）
-            // 线性映射：2-255 映射到目标范围
-            const r5 = Math.round(r / 255 * 31); // 5位：0-31
-            const g6 = Math.round(g / 255 * 63); // 6位：0-63
-            const b5 = Math.round(b / 255 * 31); // 5位：0-31
-            const rgb565 = (r5 << 11) | (g6 << 5) | b5;
-            bitmapData.push(rgb565 & 0xFF, (rgb565 >> 8) & 0xFF);
-            break;
-          case 'RGB332':
-            // RGB332: 3 bits R, 3 bits G, 2 bits B
-            // 线性映射：2-255 映射到目标范围
-            const r3 = Math.round(r / 255 * 7); // 3位：0-7
-            const g3 = Math.round(g / 255 * 7); // 3位：0-7
-            const b2 = Math.round(b / 255 * 3); // 2位：0-3
-            const rgb332 = (r3 << 5) | (g3 << 2) | b2;
-            bitmapData.push(rgb332);
-            break;
-          case 'ARGB8888':
-            // ARGB8888: 按 B, G, R, A 顺序（小端序）
-            bitmapData.push(b, g, r, a);
-            break;
-          case 'ARGB4444':
-            // ARGB4444: 4 bits each
-            // 线性映射：2-255 映射到目标范围
-            const a4 = Math.round(a / 255 * 15); // 4位：0-15
-            const r4 = Math.round(r / 255 * 15); // 4位：0-15
-            const g4 = Math.round(g / 255 * 15); // 4位：0-15
-            const b4 = Math.round(b / 255 * 15); // 4位：0-15
-            const argb4444 = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
-            bitmapData.push(argb4444 & 0xFF, (argb4444 >> 8) & 0xFF);
-            break;
-          case 'ARGB2222':
-            // ARGB2222: 2 bits each
-            // 线性映射：2-255 映射到目标范围
-            const a2 = Math.round(a / 255 * 3); // 2位：0-3
-            const r2 = Math.round(r / 255 * 3); // 2位：0-3
-            const g2 = Math.round(g / 255 * 3); // 2位：0-3
-            const b2_2 = Math.round(b / 255 * 3); // 2位：0-3
-            const argb2222 = (a2 << 6) | (r2 << 4) | (g2 << 2) | b2_2;
-            bitmapData.push(argb2222);
-            break;
-          default:
-            bitmapData.push(r, g, b);
-        }
-      }
-      
-      // 应用压缩算法
-      if (compression.value === 'rle') {
-        const compressedData = rleCompress(bitmapData, format);
-        resolve(compressedData);
-      } else {
-        resolve(bitmapData);
-      }
-    };
-    
-    img.onerror = () => {
-      reject(new Error('无法加载图片'));
-    };
-    
-    img.src = image.previewUrl;
-  });
-}
+    if (runId !== conversionRunId) return;
 
-// 解析颜色值
-function parseColor(color) {
-  // 处理十六进制颜色
-  if (color.startsWith('#')) {
-    const hex = color.slice(1);
-    if (hex.length === 6) {
-      return {
-        r: parseInt(hex.slice(0, 2), 16),
-        g: parseInt(hex.slice(2, 4), 16),
-        b: parseInt(hex.slice(4, 6), 16)
-      };
+    conversionPreviews.value = converted.previews;
+    conversionResults.value = converted.outputs;
+    published = true;
+    addInfoMessage('转换成功！', 'info');
+  } catch (err) {
+    if (!(err instanceof ConversionCancelledError)) {
+      console.error('转换失败:', err);
+      addInfoMessage(`转换失败：${err.message || String(err)}`, 'error');
     }
+  } finally {
+    if (!published && converted) {
+      releasePreviewUrls(converted.previews);
+    }
+    isConverting.value = false;
   }
-  return null;
-}
-
-// RLE压缩算法
-function rleCompress(data, format) {
-  if (data.length === 0) return [];
-  
-  const compressed = [];
-  
-  // 根据颜色格式确定压缩单位
-  const bytesPerPixel = getBytesPerPixel(format);
-  
-  if (bytesPerPixel === 1) {
-    // 单字节格式：RGB332, ARGB2222
-    let count = 1;
-    let current = data[0];
-    
-    for (let i = 1; i < data.length; i++) {
-      if (data[i] === current && count < 255) {
-        count++;
-      } else {
-        compressed.push(count, current);
-        current = data[i];
-        count = 1;
-      }
-    }
-    
-    // 添加最后一组
-    compressed.push(count, current);
-  } else if (bytesPerPixel === 2) {
-    // 双字节格式：RGB565, ARGB4444
-    let count = 1;
-    let current1 = data[0];
-    let current2 = data[1];
-    
-    for (let i = 2; i < data.length; i += 2) {
-      if (data[i] === current1 && data[i + 1] === current2 && count < 255) {
-        count++;
-      } else {
-        compressed.push(count, current1, current2);
-        current1 = data[i];
-        current2 = data[i + 1];
-        count = 1;
-      }
-    }
-    
-    // 添加最后一组
-    compressed.push(count, current1, current2);
-  } else if (bytesPerPixel === 3) {
-    // 三字节格式：RGB888
-    let count = 1;
-    let current1 = data[0];
-    let current2 = data[1];
-    let current3 = data[2];
-    
-    for (let i = 3; i < data.length; i += 3) {
-      if (data[i] === current1 && data[i + 1] === current2 && data[i + 2] === current3 && count < 255) {
-        count++;
-      } else {
-        compressed.push(count, current1, current2, current3);
-        current1 = data[i];
-        current2 = data[i + 1];
-        current3 = data[i + 2];
-        count = 1;
-      }
-    }
-    
-    // 添加最后一组
-    compressed.push(count, current1, current2, current3);
-  } else if (bytesPerPixel === 4) {
-    // 四字节格式：ARGB8888
-    let count = 1;
-    let current1 = data[0];
-    let current2 = data[1];
-    let current3 = data[2];
-    let current4 = data[3];
-    
-    for (let i = 4; i < data.length; i += 4) {
-      if (data[i] === current1 && data[i + 1] === current2 && data[i + 2] === current3 && data[i + 3] === current4 && count < 255) {
-        count++;
-      } else {
-        compressed.push(count, current1, current2, current3, current4);
-        current1 = data[i];
-        current2 = data[i + 1];
-        current3 = data[i + 2];
-        current4 = data[i + 3];
-        count = 1;
-      }
-    }
-    
-    // 添加最后一组
-    compressed.push(count, current1, current2, current3, current4);
-  }
-  
-  return compressed;
 }
 
 // 获取每个像素的字节数
@@ -1317,31 +609,6 @@ function getBytesPerPixel(format) {
     case 'ARGB4444': return 2;
     case 'ARGB2222': return 1;
     default: return 3;
-  }
-}
-
-// 获取SGL格式宏
-function getSGLFormat(format, compression) {
-  if (compression === 'rle') {
-    switch (format) {
-      case 'RGB888': return 'SGL_PIXMAP_FMT_RLE_RGB888';
-      case 'RGB565': return 'SGL_PIXMAP_FMT_RLE_RGB565';
-      case 'RGB332': return 'SGL_PIXMAP_FMT_RLE_RGB332';
-      case 'ARGB8888': return 'SGL_PIXMAP_FMT_RLE_ARGB8888';
-      case 'ARGB4444': return 'SGL_PIXMAP_FMT_RLE_ARGB4444';
-      case 'ARGB2222': return 'SGL_PIXMAP_FMT_RLE_ARGB2222';
-      default: return 'SGL_PIXMAP_FMT_RLE_RGB888';
-    }
-  } else {
-    switch (format) {
-      case 'RGB888': return 'SGL_PIXMAP_FMT_RGB888';
-      case 'RGB565': return 'SGL_PIXMAP_FMT_RGB565';
-      case 'RGB332': return 'SGL_PIXMAP_FMT_RGB332';
-      case 'ARGB8888': return 'SGL_PIXMAP_FMT_ARGB8888';
-      case 'ARGB4444': return 'SGL_PIXMAP_FMT_ARGB4444';
-      case 'ARGB2222': return 'SGL_PIXMAP_FMT_ARGB2222';
-      default: return 'SGL_PIXMAP_FMT_RGB888';
-    }
   }
 }
 
@@ -1365,7 +632,7 @@ function formatBytes(bytes) {
 function startEditingResolution(index, field) {
   editingResolutionIndex.value = index;
   editingResolutionField.value = field;
-  
+
   // 等待DOM更新后聚焦输入框
   setTimeout(() => {
     if (resolutionInput.value) {
@@ -1401,12 +668,21 @@ onMounted(() => {
 // 组件卸载时移除全局点击事件监听器
 onUnmounted(() => {
   document.removeEventListener('click', handleGlobalClick);
+  cancelPendingConversion();
+  for (const image of imageFiles.value) {
+    if (image.previewUrl) {
+      URL.revokeObjectURL(image.previewUrl);
+    }
+  }
+  clearConversionOutput();
 });
 
 // 更新分辨率
 function updateResolution(index, field, value) {
   const numValue = parseInt(value);
-  if (!isNaN(numValue) && numValue > 0) {
+  if (!isNaN(numValue) && numValue > 0 && imageFiles.value[index][field] !== numValue) {
+    cancelPendingConversion();
+    clearConversionOutput();
     imageFiles.value[index][field] = numValue;
   }
 }
@@ -1423,166 +699,82 @@ async function copyMessageContent(content) {
 }
 
 // 复制转换结果
-async function copyResult(code) {
+async function copyResult(result) {
   try {
+    const code = result.kind === 'c'
+      ? collectCCode(result, MAX_COPY_CODE_BYTES)
+      : result.code;
     await navigator.clipboard.writeText(code);
     showCopyTip.value = true;
     setTimeout(() => showCopyTip.value = false, 1000);
     addInfoMessage('代码已复制到剪贴板', 'info');
   } catch (err) {
     console.error('复制失败：', err);
-    addInfoMessage('复制失败', 'error');
+    addInfoMessage(err.message || '复制失败', 'error');
   }
 }
 
-// 下载转换结果
-async function downloadResult(code, filename) {
+async function downloadResult(result) {
+  if (!outputFolder.value) {
+    addInfoMessage('请先选择输出文件夹', 'error');
+    return;
+  }
+
+  const fileName = getOutputFileName(result);
+  const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
+  const filePath = outputFolder.value + separator + fileName;
+
   try {
-    // 生成文件名：使用数组名输入框的值
-    let defaultFileName;
-    if (combineAsArray.value && imageFiles.value.length > 1) {
-      // 组合数组模式：使用数组名输入框的值
-      const safeArrayName = arrayName.value.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-      defaultFileName = `${safeArrayName}.c`;
+    if (result.kind === 'bin') {
+      await writeBinaryResult(filePath, result);
+    } else if (result.kind === 'c') {
+      await writeCResult(filePath, result);
     } else {
-      // 单个文件模式：使用原文件名
-      const filenameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-      const safeFilename = filenameWithoutExt.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-      defaultFileName = `${safeFilename}.c`;
+      await writeTextFile(filePath, result.code);
     }
-    
-    console.log('开始下载，文件名:', defaultFileName);
-    
-    // 检查是否存在输出文件夹
-    if (!outputFolder.value) {
-      console.error('未选择输出文件夹');
-      addInfoMessage('请先选择输出文件夹', 'error');
-      return;
-    }
-    
-    console.log('使用用户选择的输出文件夹:', outputFolder.value);
-    
-    // 构建完整的文件路径
-    const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
-    const filePath = outputFolder.value + separator + defaultFileName;
-    console.log('构建的文件路径:', filePath);
-    
-    // 尝试使用Tauri的invoke API来调用自定义的Rust命令
-    try {
-      console.log('尝试导入invoke API');
-      const { invoke } = await import('@tauri-apps/api/core');
-      console.log('invoke API导入成功');
-      
-      console.log('调用write_file命令');
-      const result = await invoke('write_file', {
-        path: filePath,
-        content: code
-      });
-      
-      console.log('write_file命令返回:', result);
-      
-      if (result && result.success === 'true') {
-        console.log('文件保存成功');
-        addInfoMessage(`文件已保存：${result.path || filePath}`, 'info');
-      } else {
-        console.log('文件保存失败');
-        addInfoMessage(`文件保存失败：${result?.error || '未知错误'}`, 'error');
-      }
-    } catch (invokeError) {
-      console.error('Invoke操作失败：', invokeError);
-      console.error('错误名称:', invokeError.name);
-      console.error('错误消息:', invokeError.message);
-      console.error('错误堆栈:', invokeError.stack);
-      addInfoMessage(`文件写入失败：${invokeError.message || '未知错误'}`, 'error');
-    }
+    addInfoMessage(`文件已保存：${filePath}`, 'info');
   } catch (err) {
     console.error('下载失败：', err);
-    console.error('错误名称:', err.name);
-    console.error('错误消息:', err.message);
-    console.error('错误堆栈:', err.stack);
-    addInfoMessage(`下载失败：${err.message || '未知错误'}`, 'error');
+    addInfoMessage(`文件写入失败：${err.message || String(err)}`, 'error');
   }
 }
 
-// 下载bin文件结果
-async function downloadBinResult(binData, filename) {
-  try {
-    // 生成文件名：使用传入的文件名，确保使用.bin扩展名
-    const safeFilename = filename.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z_]/, '_');
-    const defaultFileName = `${safeFilename}.bin`;
-    
-    console.log('开始下载bin文件，文件名:', defaultFileName);
-    
-    // 检查是否存在输出文件夹
-    if (!outputFolder.value) {
-      console.error('未选择输出文件夹');
-      addInfoMessage('请先选择输出文件夹', 'error');
-      return;
-    }
-    
-    console.log('使用用户选择的输出文件夹:', outputFolder.value);
-    
-    // 构建完整的文件路径
-    const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
-    const filePath = outputFolder.value + separator + defaultFileName;
-    console.log('构建的文件路径:', filePath);
-    
-    // 尝试使用Tauri的invoke API来调用自定义的Rust命令
-    try {
-      console.log('尝试导入invoke API');
-      const { invoke } = await import('@tauri-apps/api/core');
-      console.log('invoke API导入成功');
-      
-      // 使用更可靠的方法将Uint8Array转换为base64字符串
-      // 创建一个Blob对象
-      const blob = new Blob([binData], { type: 'application/octet-stream' });
-      
-      // 使用FileReader来读取并转换为base64
-      const base64Data = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          // 移除data URL前缀，只获取base64部分
-          const result = reader.result;
-          if (typeof result === 'string') {
-            const base64 = result.split(',')[1];
-            resolve(base64);
-          } else {
-            reject(new Error('Failed to read blob'));
-          }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      
-      console.log('调用write_bin_file命令');
-      const result = await invoke('write_bin_file', {
-        path: filePath,
-        content: base64Data
-      });
-      
-      console.log('write_bin_file命令返回:', result);
-      
-      if (result && result.success === 'true') {
-        console.log('bin文件保存成功');
-        addInfoMessage(`bin文件已保存：${result.path || filePath}`, 'info');
-      } else {
-        console.log('bin文件保存失败');
-        addInfoMessage(`bin文件保存失败：${result?.error || '未知错误'}`, 'error');
-      }
-    } catch (invokeError) {
-      console.error('Invoke操作失败：', invokeError);
-      console.error('错误名称:', invokeError.name);
-      console.error('错误消息:', invokeError.message);
-      console.error('错误堆栈:', invokeError.stack);
-      addInfoMessage(`bin文件写入失败：${invokeError.message || '未知错误'}`, 'error');
-    }
-  } catch (err) {
-    console.error('bin文件下载失败：', err);
-    console.error('错误名称:', err.name);
-    console.error('错误消息:', err.message);
-    console.error('错误堆栈:', err.stack);
-    addInfoMessage(`bin文件下载失败：${err.message || '未知错误'}`, 'error');
+function getOutputFileName(result) {
+  const extension = result.kind === 'bin' ? '.bin' : '.c';
+  const baseName = (result.name || 'image')
+    .replace(/\.(?:c|bin)$/i, '')
+    .replace(/[^a-zA-Z0-9_]/g, '_')
+    .replace(/^[^a-zA-Z_]/, '_');
+  return `${baseName}${extension}`;
+}
+
+async function writeCResult(path, result) {
+  let append = false;
+  for (const chunk of createCCodeChunks(result.infos, result.settings, CODE_WRITE_CHUNK_SIZE)) {
+    await invoke('write_file_chunk', { path, content: chunk, append });
+    append = true;
   }
+}
+
+async function writeBinaryResult(path, result) {
+  let append = false;
+  for (const chunk of createBinaryChunks(result.binParts)) {
+    await invoke('write_bin_file_chunk', {
+      path,
+      content: bytesToBase64(chunk),
+      append
+    });
+    append = true;
+  }
+}
+
+function bytesToBase64(bytes) {
+  const blockSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += blockSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + blockSize, bytes.length)));
+  }
+  return btoa(binary);
 }
 
 let messageId = 0;

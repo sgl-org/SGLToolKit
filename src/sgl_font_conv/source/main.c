@@ -37,6 +37,8 @@ static void print_usage(const char *prog)
         "  --symbols-file <path>  Read characters from text file\n"
         "  --range <start-end>   Unicode range (hex), e.g. 0x20-0x7F\n"
         "  --compress            Enable RLE compression (bpp 2/4 only)\n"
+        "  --smart-mono           Enable smart monospace (group by script)\n"
+        "  --spacing <px>         Extra pixel spacing between characters (default 0)\n"
         "\n"
         "Example (single font):\n"
         "  %s --font font.otf --symbols-file chinese.txt --size 24 --bpp 4 --output out.c\n"
@@ -208,6 +210,8 @@ int main(int argc, char *argv[])
     int pixel_size = 0;
     int bpp = 0;
     int compress_flag = 0;
+    int smart_mono_flag = 0;
+    int spacing_val = 0;
 
     font_entry_t *font_head = NULL;
     font_entry_t *font_tail = NULL;
@@ -244,6 +248,10 @@ int main(int argc, char *argv[])
             output_path = argv[++i];
         } else if (strcmp(argv[i], "--compress") == 0) {
             compress_flag = 1;
+        } else if (strcmp(argv[i], "--smart-mono") == 0) {
+            smart_mono_flag = 1;
+        } else if (strcmp(argv[i], "--spacing") == 0 && i + 1 < argc) {
+            spacing_val = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--symbols") == 0 && i + 1 < argc) {
             if (!current_entry) {
                 fprintf(stderr, "Error: --symbols must follow a --font\n");
@@ -424,7 +432,9 @@ int main(int argc, char *argv[])
         .cmap = &cmap,
         .bpp = bpp,
         .compress = compress_flag,
-        .font_name = font_name
+        .font_name = font_name,
+        .smart_mono = smart_mono_flag,
+        .spacing = spacing_val
     };
 
     printf("Writing output to %s...\n", output_path);

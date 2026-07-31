@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:csidecar && vite build",
+    "build:csidecar": "cd src\\sgl_font_conv\\source && make && copy /Y sgl_font_conv.exe ..\\..\\..\\src-tauri\\binaries\\sgl_font_conv-x86_64-pc-windows-msvc.exe",
+    "test:image-conversion": "node tests/imageConversion.test.js",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.2",
+    "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",

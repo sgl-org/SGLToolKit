@@ -158,6 +158,54 @@ async fn write_bin_file(path: String, content: String) -> std::collections::Hash
 }
 
 #[tauri::command]
+fn write_file_chunk(path: String, content: String, append: bool) -> Result<(), String> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let mut options = OpenOptions::new();
+    options.create(true).write(true);
+    if append {
+        options.append(true);
+    } else {
+        options.truncate(true);
+    }
+
+    let mut file = options
+        .open(&path)
+        .map_err(|e| format!("无法打开输出文件: {}", e))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("无法写入输出文件: {}", e))?;
+    file.flush()
+        .map_err(|e| format!("无法刷新输出文件: {}", e))
+}
+
+#[tauri::command]
+fn write_bin_file_chunk(path: String, content: String, append: bool) -> Result<(), String> {
+    use base64::{Engine as _, engine::general_purpose};
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let decoded = general_purpose::STANDARD
+        .decode(content)
+        .map_err(|e| format!("无法解码二进制数据块: {}", e))?;
+    let mut options = OpenOptions::new();
+    options.create(true).write(true);
+    if append {
+        options.append(true);
+    } else {
+        options.truncate(true);
+    }
+
+    let mut file = options
+        .open(&path)
+        .map_err(|e| format!("无法打开输出文件: {}", e))?;
+    file.write_all(&decoded)
+        .map_err(|e| format!("无法写入输出文件: {}", e))?;
+    file.flush()
+        .map_err(|e| format!("无法刷新输出文件: {}", e))
+}
+
+#[tauri::command]
 async fn zip_files(files: Vec<ZipFile>, output_path: String) -> std::collections::HashMap<String, String> {
     use std::fs;
     use std::io::Write;
@@ -242,7 +290,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, run_shell_command, read_file_as_base64, save_file, write_file, write_bin_file, zip_files])
+        .invoke_handler(tauri::generate_handler![greet, run_shell_command, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

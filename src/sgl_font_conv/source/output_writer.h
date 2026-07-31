@@ -11,6 +11,8 @@ typedef struct {
     int                bpp;
     int                compress;
     const char        *font_name;  /* variable name for sgl_font_t */
+    int                smart_mono;  /* enable smart monospace (group by script) */
+    int                spacing;     /* extra pixel spacing between characters */
 } writer_ctx_t;
 
 /* Write complete SGL font C source file to the given FILE handle. */

@@ -4,9 +4,9 @@
       <div class="form-section">
         <label class="form-label">字体文件</label>
         <div class="file-input-wrapper">
-          <input 
-            v-model="fontFilePath" 
-            type="text" 
+          <input
+            v-model="fontFilePath"
+            type="text"
             placeholder="选择字体文件路径"
             class="form-input path-input"
             readonly
@@ -19,11 +19,11 @@
         <div class="settings-row">
           <div class="setting-item">
             <label class="setting-label">字体大小</label>
-            <input 
-              v-model.number="fontSize" 
-              type="number" 
-              min="8" 
-              max="128" 
+            <input
+              v-model.number="fontSize"
+              type="number"
+              min="8"
+              max="128"
               class="form-input setting-input"
             />
           </div>
@@ -57,6 +57,23 @@
               <span>压缩</span>
             </div>
           </div>
+          <div class="setting-item">
+            <label class="setting-label">智能等宽</label>
+            <div class="setting-checkbox-box">
+              <input v-model="smartMono" type="checkbox" />
+              <span>等宽</span>
+            </div>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">字符间距增加</label>
+            <input
+              v-model.number="charSpacing"
+              type="number"
+              min="0"
+              max="32"
+              class="form-input setting-input"
+            />
+          </div>
         </div>
       </div>
 
@@ -65,24 +82,24 @@
           <div class="range-section">
             <label class="form-label">字符范围</label>
             <div class="range-inputs">
-              <input 
-                v-model="charRangeStart" 
-                type="text" 
+              <input
+                v-model="charRangeStart"
+                type="text"
                 placeholder="0x20"
                 class="form-input small"
               />
               <span>-</span>
-              <input 
-                v-model="charRangeEnd" 
-                type="text" 
+              <input
+                v-model="charRangeEnd"
+                type="text"
                 placeholder="0x7F"
                 class="form-input small"
               />
               <button class="add-range-btn" @click="addCharRange">添加</button>
             </div>
             <div class="range-tags">
-              <span 
-                v-for="(range, index) in charRanges" 
+              <span
+                v-for="(range, index) in charRanges"
                 :key="index"
                 class="range-tag"
               >
@@ -93,9 +110,9 @@
           </div>
           <div class="fontname-section">
             <label class="form-label">字体名称</label>
-            <input 
-              v-model="fontName" 
-              type="text" 
+            <input
+              v-model="fontName"
+              type="text"
               placeholder="输入字体名称"
               class="form-input fontname-input"
             />
@@ -105,8 +122,8 @@
 
       <div class="form-section">
         <label class="form-label">自定义字符</label>
-        <textarea 
-          v-model="customChars" 
+        <textarea
+          v-model="customChars"
           rows="3"
           placeholder="输入要包含的字符"
           class="form-input custom-chars-textarea"
@@ -116,9 +133,9 @@
       <div class="form-section icon-font-section">
         <label class="form-label">图标字体文件</label>
         <div class="file-input-wrapper">
-          <input 
-            v-model="iconFontFilePath" 
-            type="text" 
+          <input
+            v-model="iconFontFilePath"
+            type="text"
             placeholder="选择图标字体文件路径"
             class="form-input path-input"
             readonly
@@ -130,11 +147,14 @@
       <div class="form-section" v-if="iconFontFilePath">
         <div class="form-label-with-button">
           <label class="form-label">图标预览</label>
-          <button class="select-all-btn" @click="toggleSelectAllIcons">{{ allIconsSelected ? '全取消' : '全选' }}</button>
+          <div class="preview-btn-group">
+            <button class="select-all-btn" @click="selectAllIcons">全选</button>
+            <button class="deselect-all-btn" @click="deselectAllIcons">全删</button>
+          </div>
         </div>
         <div class="icon-preview-container">
-          <div 
-            v-for="(icon, index) in iconList" 
+          <div
+            v-for="(icon, index) in iconList"
             :key="index"
             class="icon-item"
             @click="toggleIconSelection(icon)"
@@ -147,12 +167,27 @@
         </div>
       </div>
 
+      <div class="form-section" v-if="iconFontFilePath && selectedIcons.length > 0">
+        <label class="form-label">选中预览</label>
+        <div class="icon-preview-container">
+          <div
+            v-for="(icon, index) in selectedIcons"
+            :key="index"
+            class="icon-item selected"
+            @click="toggleIconSelection(icon)"
+          >
+            <div class="icon-char">{{ icon.char }}</div>
+            <div class="icon-code">U+{{ icon.code > 0xFFFF ? icon.code.toString(16).toUpperCase().padStart(6, '0') : icon.code.toString(16).toUpperCase().padStart(4, '0') }}</div>
+          </div>
+        </div>
+      </div>
+
       <div class="form-section">
         <label class="form-label">输出文件夹</label>
         <div class="file-input-wrapper">
-          <input 
-            v-model="outputDirPath" 
-            type="text" 
+          <input
+            v-model="outputDirPath"
+            type="text"
             placeholder="选择输出文件夹路径"
             class="form-input path-input"
             readonly
@@ -162,9 +197,9 @@
       </div>
 
       <div class="form-actions">
-        <button 
-          class="convert-btn" 
-          @click="convertFont" 
+        <button
+          class="convert-btn"
+          @click="convertFont"
           :disabled="!canConvert || isConverting"
         >
           {{ isConverting ? '转换中...' : '开始转换' }}
@@ -178,15 +213,15 @@
     <div class="info-bar">
       <h4>LOG信息</h4>
       <div class="info-messages" ref="infoMessagesRef">
-        <div 
-          v-for="(msg, index) in infoMessages" 
+        <div
+          v-for="(msg, index) in infoMessages"
           :key="index"
           :class="['info-message', msg.type]"
         >
           <span class="msg-time">{{ msg.time }}</span>
           <span class="msg-content">{{ msg.content }}</span>
-          <button 
-            v-if="msg.type === 'error'" 
+          <button
+            v-if="msg.type === 'error'"
             class="copy-msg-btn"
             @click="copyMessageContent(msg.content)"
             title="复制内容"
@@ -203,7 +238,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { resolve, join } from '@tauri-apps/api/path';
@@ -227,18 +262,49 @@ const selectedIcons = ref([]);
 const iconFontUrl = ref('');
 const align = ref(1);
 const compress = ref(false);
+const smartMono = ref(false);
+const charSpacing = ref(0);
 const isConverting = ref(false);
 const infoMessagesRef = ref(null);
 
 const showCopyTip = ref(false);
 
-const allIconsSelected = computed(() => {
-  return iconList.value.length > 0 && selectedIcons.value.length === iconList.value.length;
-});
-
 const canConvert = computed(() => {
   return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
 });
+
+/* ---------- 字体名称自动生成 ---------- */
+
+/* 判断是否为纯英文+下划线组合 */
+function isValidEnglishName(name) {
+  return /^[a-zA-Z_]+$/.test(name);
+}
+
+/* 根据字体文件名+大小自动生成字体名称 */
+function autoGenerateFontName() {
+  if (!fontFilePath.value) return;
+  const parts = fontFilePath.value.split(/[/\\]/);
+  const fileName = parts[parts.length - 1];
+  /* 去掉扩展名 */
+  const dotIndex = fileName.lastIndexOf('.');
+  const baseName = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
+
+  if (isValidEnglishName(baseName)) {
+    fontName.value = `${baseName}_${fontSize.value}`;
+  } else {
+    fontName.value = `sgl_font_${fontSize.value}`;
+  }
+}
+
+/* 监听字体大小变化，自动更新字体名称 */
+watch(fontSize, () => {
+  if (fontFilePath.value) {
+    autoGenerateFontName();
+  }
+});
+
+/* 页面加载时，如果已从 localStorage 恢复上次的字体文件路径，自动生成字体名称 */
+autoGenerateFontName();
 
 
 
@@ -253,10 +319,11 @@ async function selectFontFile() {
         { name: '所有文件', extensions: ['*'] }
       ]
     });
-    
+
     if (selected) {
       fontFilePath.value = selected;
       fontFileName.value = selected.split(/[/\\]/).pop() || '已选择字体文件';
+      autoGenerateFontName();
       localStorage.setItem('lastFontFilePath', selected);
     }
   } catch (err) {
@@ -272,7 +339,7 @@ async function selectOutputDir() {
       multiple: false,
       title: '选择输出文件夹'
     });
-    
+
     if (selected) {
       outputDirPath.value = selected;
       outputDirName.value = selected.split(/[/\\]/).pop() || '已选择文件夹';
@@ -295,7 +362,7 @@ async function selectIconFontFile() {
         { name: '所有文件', extensions: ['*'] }
       ]
     });
-    
+
     if (selected) {
       iconFontFilePath.value = selected;
       await parseIconFont(selected);
@@ -309,7 +376,7 @@ async function selectIconFontFile() {
 async function parseIconFont(filePath) {
   try {
     console.log('开始解析图标字体:', filePath);
-    
+
     const opentype = await import('opentype.js');
     const base64Data = await invoke('read_file_as_base64', { path: filePath });
     const binaryString = atob(base64Data);
@@ -319,11 +386,11 @@ async function parseIconFont(filePath) {
     }
     const arrayBuffer = bytes.buffer;
     console.log('ArrayBuffer 创建成功，大小:', arrayBuffer.byteLength);
-    
+
     const font = opentype.parse(arrayBuffer);
     console.log('字体解析成功，字体名称:', font.names.fontFamily);
     console.log('字体表数量:', font.tables ? Object.keys(font.tables).length : 0);
-    
+
     // 移除旧的字体样式
     const oldStyle = document.getElementById('icon-font-style');
     if (oldStyle) {
@@ -332,12 +399,12 @@ async function parseIconFont(filePath) {
     if (iconFontUrl.value) {
       URL.revokeObjectURL(iconFontUrl.value);
     }
-    
+
     // 创建字体 URL 用于显示
     const fontBlob = new Blob([bytes], { type: 'font/ttf' });
     const fontUrl = URL.createObjectURL(fontBlob);
     iconFontUrl.value = fontUrl;
-    
+
     // 动态创建 @font-face 样式
     const fontFaceStyle = document.createElement('style');
     fontFaceStyle.id = 'icon-font-style';
@@ -354,15 +421,15 @@ async function parseIconFont(filePath) {
       }
     `;
     document.head.appendChild(fontFaceStyle);
-    
+
     // 等待字体加载
     await document.fonts.load('16px IconFont');
     console.log('字体加载完成');
-    
+
     const icons = [];
     const glyphNames = Object.keys(font.glyphs.glyphs);
     console.log('字形数量:', glyphNames.length);
-    
+
     glyphNames.forEach(name => {
       const glyph = font.glyphs.glyphs[name];
       if (glyph && glyph.unicode !== undefined && glyph.unicode !== null) {
@@ -372,7 +439,7 @@ async function parseIconFont(filePath) {
         // 第一辅助平面: U+F0000-U+FFFFD (Font Awesome 6+)
         // 第二辅助平面: U+100000-U+10FFFD
         // Font Awesome 7/8 常用范围
-        if ((unicode >= 0xE000 && unicode <= 0xF8FF) || 
+        if ((unicode >= 0xE000 && unicode <= 0xF8FF) ||
             (unicode >= 0xF000 && unicode <= 0xF2FF) ||
             (unicode >= 0xF400 && unicode <= 0xF4FF) ||
             (unicode >= 0x2000 && unicode <= 0x2BFF) ||
@@ -387,7 +454,7 @@ async function parseIconFont(filePath) {
         }
       }
     });
-    
+
     // 如果没有找到图标，尝试包含所有非零 unicode 的字形
     if (icons.length === 0) {
       console.log('在标准范围内未找到图标，尝试包含所有字形...');
@@ -402,15 +469,15 @@ async function parseIconFont(filePath) {
         }
       });
     }
-    
+
     icons.sort((a, b) => a.code - b.code);
     console.log('找到图标数量:', icons.length);
-    
+
     // 显示前10个图标的详细信息用于调试
     if (icons.length > 0) {
       console.log('前10个图标:', icons.slice(0, 10));
     }
-    
+
     iconList.value = icons;
     selectedIcons.value = [];
   } catch (err) {
@@ -430,14 +497,12 @@ function toggleIconSelection(icon) {
   }
 }
 
-function toggleSelectAllIcons() {
-  if (allIconsSelected.value) {
-    // 全取消
-    selectedIcons.value = [];
-  } else {
-    // 全选
-    selectedIcons.value = [...iconList.value];
-  }
+function selectAllIcons() {
+  selectedIcons.value = [...iconList.value];
+}
+
+function deselectAllIcons() {
+  selectedIcons.value = [];
 }
 
 function parseHexValue(str) {
@@ -527,6 +592,14 @@ async function convertFont() {
       args.push('--compress');
     }
 
+    if (smartMono.value) {
+      args.push('--smart-mono');
+    }
+
+    if (charSpacing.value > 0) {
+      args.push('--spacing', charSpacing.value.toString());
+    }
+
     // 设置输出路径（必需）
     let outputFullPath;
     if (outputDirPath.value) {
@@ -561,17 +634,17 @@ async function convertFont() {
     const result = await invoke("run_shell_command", { cmd: exePath, args });
 
     console.log("转换成功:", result);
-    
+
     // 如果有图标字体，在C文件末尾追加宏定义
     if (selectedIcons.value.length > 0) {
       try {
         const { readTextFile, writeTextFile } = await import('@tauri-apps/plugin-fs');
         let cFileContent = await readTextFile(outputFullPath);
-        
+
         // 生成宏定义
         const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
         let macroDefinitions = '\n\n// Icon macros\n';
-        
+
         for (const icon of sortedIcons) {
           const macroName = `SGL_ICON_${icon.code.toString(16).toUpperCase()}`;
           const charBytes = icon.char.split('').map(c => {
@@ -592,10 +665,10 @@ async function convertFont() {
               return utf8Bytes.map(b => `\\x${b.toString(16).padStart(2, '0')}`).join('');
             }
           }).join('');
-          
+
           macroDefinitions += `#define ${macroName} "${charBytes}"\n`;
         }
-        
+
         cFileContent += macroDefinitions;
         await writeTextFile(outputFullPath, cFileContent);
         console.log('已追加图标宏定义到C文件');
@@ -1177,6 +1250,27 @@ h2 {
   color: white;
 }
 
+.preview-btn-group {
+  display: flex;
+  gap: 6px;
+}
+
+.deselect-all-btn {
+  background: transparent;
+  border: 1px solid #ff4d4f;
+  color: #ff4d4f;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.deselect-all-btn:hover {
+  background: #ff4d4f;
+  color: white;
+}
+
 /* 深色主题样式 */
 html.dark .form-label-with-button .form-label {
   color: rgba(255, 255, 255, 0.88);
@@ -1189,6 +1283,16 @@ html.dark .select-all-btn {
 
 html.dark .select-all-btn:hover {
   background: #40a9ff;
+  color: white;
+}
+
+html.dark .deselect-all-btn {
+  border-color: #ff7875;
+  color: #ff7875;
+}
+
+html.dark .deselect-all-btn:hover {
+  background: #ff7875;
   color: white;
 }
 

@@ -155,9 +155,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
+import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 import { GifReader } from 'omggif';
 
@@ -172,6 +172,31 @@ const frameCount = ref(1);
 const totalFrames = ref(1);
 const isDownloading = ref(false);
 const outputFolder = ref('');
+const MAX_GIF_PIXELS = 16 * 1024 * 1024;
+const MAX_GIF_FRAMES = 120;
+const MAX_GIF_PREVIEW_PIXELS = 1024 * 1024;
+const MAX_ZIP_BYTES = 64 * 1024 * 1024;
+
+function releaseUrls(items) {
+  for (const item of items) {
+    if (typeof item?.url === 'string' && item.url.startsWith('blob:')) {
+      URL.revokeObjectURL(item.url);
+    }
+  }
+}
+
+function canvasToBlob(canvas, type = 'image/png') {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('无法生成图片预览')), type);
+  });
+}
+
+function releaseCanvas(canvas) {
+  if (canvas) {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
 
 // 选择GIF文件
 async function selectGifFile() {
@@ -187,6 +212,7 @@ async function selectGifFile() {
     });
 
     if (selected) {
+      clearGifFile(false);
       // 处理返回值：当multiple为false时，返回单个文件路径字符串；当multiple为true时，返回文件路径数组
       const filePath = Array.isArray(selected) ? selected[0] : selected;
       
@@ -198,15 +224,7 @@ async function selectGifFile() {
       // 从文件路径获取文件名
       const fileName = filePath.split(/[/\\]/).pop() || '未命名.gif';
       
-      // 使用Tauri的invoke来读取文件内容并转换为base64
-      const base64Data = await invoke('read_file_as_base64', { path: filePath });
-      
-      // 将base64数据转换为Blob并创建预览URL
-      const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      const bytes = await readFile(filePath);
       const blob = new Blob([bytes], { type: 'image/gif' });
       const previewUrl = URL.createObjectURL(blob);
       
@@ -218,7 +236,7 @@ async function selectGifFile() {
       };
       
       // 分解GIF帧
-      await decomposeGif(blob);
+      await decomposeGif(bytes);
       
       addInfoMessage(`已选择GIF文件: ${fileName}`, 'info');
     }
@@ -249,12 +267,8 @@ async function selectOutputFolder() {
 }
 
 // 分解GIF帧
-async function decomposeGif(blob) {
+async function decomposeGif(data) {
   try {
-    // 读取GIF文件内容
-    const arrayBuffer = await blob.arrayBuffer();
-    const data = new Uint8Array(arrayBuffer);
-    
     // 输出文件基本信息
     console.log('GIF文件大小:', data.length, '字节');
     
@@ -275,76 +289,25 @@ async function decomposeGif(blob) {
     if (parsedFrameCount === 0) {
       throw new Error('未检测到GIF帧');
     }
+    if (parsedFrameCount > MAX_GIF_FRAMES) {
+      throw new Error(`GIF帧数超过 ${MAX_GIF_FRAMES} 帧限制`);
+    }
+    if (reader.width * reader.height > MAX_GIF_PIXELS) {
+      throw new Error(`GIF分辨率超过 ${MAX_GIF_PIXELS.toLocaleString()} 像素限制`);
+    }
     
     // 设置总帧数
     totalFrames.value = parsedFrameCount;
     frameCount.value = Math.min(parsedFrameCount, frameCount.value);
     
     // 创建帧预览
+    releaseUrls(frames.value);
     frames.value = [];
     
-    // 为每一帧生成静态图片
+    // 顺序生成帧预览，避免同时保留所有帧的 Canvas 和 RGBA 缓冲区
     for (let i = 0; i < parsedFrameCount; i++) {
-      // 使用立即执行函数创建闭包，确保每个回调使用正确的索引
-      (function(index) {
-        // 创建新的canvas元素来生成每一帧
-        const frameCanvas = document.createElement('canvas');
-        const frameCtx = frameCanvas.getContext('2d');
-        
-        // 设置canvas尺寸
-        frameCanvas.width = reader.width;
-        frameCanvas.height = reader.height;
-        
-        // 填充白色背景
-        frameCtx.fillStyle = '#ffffff';
-        frameCtx.fillRect(0, 0, reader.width, reader.height);
-        
-        try {
-          // 创建像素数组
-          const pixels = new Uint8ClampedArray(reader.width * reader.height * 4);
-          
-          // 解码当前帧 - 使用正确的API调用方式
-          reader.decodeAndBlitFrameRGBA(index, pixels);
-          
-          // 创建ImageData对象
-          const imageData = frameCtx.createImageData(reader.width, reader.height);
-          
-          // 检查imageData.data是否存在
-          if (imageData && imageData.data) {
-            // 手动复制像素数据，确保颜色正确
-            for (let j = 0; j < pixels.length; j++) {
-              imageData.data[j] = pixels[j];
-            }
-            
-            // 绘制到canvas
-            frameCtx.putImageData(imageData, 0, 0);
-          } else {
-            console.error('无法创建ImageData对象');
-          }
-        } catch (frameError) {
-          console.error('解码帧失败:', frameError);
-          // 绘制错误信息
-          frameCtx.fillStyle = '#ff0000';
-          frameCtx.font = '12px Arial';
-          frameCtx.fillText('帧解码失败', 10, 20);
-        }
-        
-        // 添加帧编号，以便区分不同的帧
-        frameCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        frameCtx.font = '14px Arial';
-        frameCtx.textAlign = 'center';
-        frameCtx.textBaseline = 'bottom';
-        frameCtx.fillText(`帧 ${index + 1}`, reader.width / 2, reader.height - 5);
-        
-        // 将canvas转换为静态图片URL
-        const frameUrl = frameCanvas.toDataURL(`image/png`); // 固定使用PNG格式，确保静态图片
-        
-        // 添加到帧列表
-        frames.value.push({
-          url: frameUrl,
-          index: index
-        });
-      })(i);
+      const frameUrl = await renderGifFrame(reader, i);
+      frames.value.push({ url: frameUrl, index: i });
     }
   } catch (error) {
     console.error('分解GIF失败:', error);
@@ -355,34 +318,90 @@ async function decomposeGif(blob) {
     frameCount.value = 1;
     
     // 创建默认帧
+    releaseUrls(frames.value);
     frames.value = [];
     for (let i = 0; i < 10; i++) {
       const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = 100;
-      canvas.height = 100;
-      ctx.fillStyle = '#f0f0f0';
-      ctx.fillRect(0, 0, 100, 100);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.font = '12px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(`帧 ${i + 1}`, 50, 95);
-      const frameUrl = canvas.toDataURL('image/png');
-      frames.value.push({ url: frameUrl, index: i });
+      try {
+        const ctx = canvas.getContext('2d');
+        canvas.width = 100;
+        canvas.height = 100;
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, 100, 100);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`帧 ${i + 1}`, 50, 95);
+        const blob = await canvasToBlob(canvas);
+        frames.value.push({ url: URL.createObjectURL(blob), index: i });
+      } finally {
+        releaseCanvas(canvas);
+      }
     }
   }
 }
 
+async function renderGifFrame(reader, index) {
+  const canvas = document.createElement('canvas');
+  const previewSize = getPreviewSize(reader.width, reader.height, MAX_GIF_PREVIEW_PIXELS);
+  canvas.width = previewSize.width;
+  canvas.height = previewSize.height;
+  const context = canvas.getContext('2d');
+
+  try {
+    const pixels = new Uint8ClampedArray(reader.width * reader.height * 4);
+    reader.decodeAndBlitFrameRGBA(index, pixels);
+    const imageData = context.createImageData(previewSize.width, previewSize.height);
+    for (let y = 0; y < previewSize.height; y++) {
+      const sourceY = Math.min(reader.height - 1, Math.floor(y * reader.height / previewSize.height));
+      for (let x = 0; x < previewSize.width; x++) {
+        const sourceX = Math.min(reader.width - 1, Math.floor(x * reader.width / previewSize.width));
+        const sourceOffset = (sourceY * reader.width + sourceX) * 4;
+        const targetOffset = (y * previewSize.width + x) * 4;
+        imageData.data[targetOffset] = pixels[sourceOffset];
+        imageData.data[targetOffset + 1] = pixels[sourceOffset + 1];
+        imageData.data[targetOffset + 2] = pixels[sourceOffset + 2];
+        imageData.data[targetOffset + 3] = pixels[sourceOffset + 3];
+      }
+    }
+    context.putImageData(imageData, 0, 0);
+    context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    context.font = '14px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'bottom';
+    context.fillText(`帧 ${index + 1}`, previewSize.width / 2, previewSize.height - 5);
+    const blob = await canvasToBlob(canvas);
+    return URL.createObjectURL(blob);
+  } finally {
+    releaseCanvas(canvas);
+  }
+}
+
+function getPreviewSize(width, height, maxPixels) {
+  const pixelCount = width * height;
+  if (pixelCount <= maxPixels) return { width, height };
+  const scale = Math.sqrt(maxPixels / pixelCount);
+  return {
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale))
+  };
+}
+
 // 清除GIF文件
-function clearGifFile() {
-  if (gifFile.value) {
+function clearGifFile(showMessage = true) {
+  const hadFile = Boolean(gifFile.value);
+  if (gifFile.value?.previewUrl) {
     URL.revokeObjectURL(gifFile.value.previewUrl);
-    gifFile.value = null;
-    frames.value = [];
-    conversionResults.value = [];
-    totalFrames.value = 1;
-    frameCount.value = 1;
+  }
+  gifFile.value = null;
+  releaseUrls(frames.value);
+  releaseUrls(conversionResults.value);
+  frames.value = [];
+  conversionResults.value = [];
+  totalFrames.value = 1;
+  frameCount.value = 1;
+  if (showMessage && hadFile) {
     addInfoMessage('已清除GIF文件', 'info');
   }
 }
@@ -390,73 +409,77 @@ function clearGifFile() {
 // 开始转换
 async function convertGif() {
   if (!gifFile.value) return;
-  
+
+  const outputType = outputFormat.value;
+  const sourceFrames = frames.value.slice(0, Math.min(frameCount.value, frames.value.length));
+  const fileBaseName = gifFile.value.name.replace(/\.gif$/i, '');
+
   try {
     isConverting.value = true;
     addInfoMessage('开始转换GIF...', 'info');
-    
-    // 清空之前的转换结果
+    releaseUrls(conversionResults.value);
     conversionResults.value = [];
-    const totalFramesToConvert = Math.min(frameCount.value, frames.value.length);
-    let processedFrames = 0;
-    
-    // 处理每一帧
-    for (let i = 0; i < totalFramesToConvert; i++) {
-      // 使用立即执行函数创建闭包，确保每个回调使用正确的索引
-      (function(index) {
-        // 为每个帧生成独立的静态图片
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const img = new Image();
-        
-        // 设置canvas尺寸
-        canvas.width = 200;
-        canvas.height = 200;
-        
-        img.onload = function() {
-          // 绘制图片到canvas
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          
-          // 添加帧编号，以便区分不同的帧
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-          ctx.font = '16px Arial';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(`帧 ${index + 1}`, canvas.width / 2, canvas.height - 10);
-          
-          // 将canvas转换为静态图片URL
-          const frameUrl = canvas.toDataURL(`image/${outputFormat.value}`);
-          
-          // 添加到转换结果
-          conversionResults.value.push({
-            name: `${gifFile.value.name.replace('.gif', '')}_frame_${index + 1}.${outputFormat.value}`,
-            url: frameUrl
-          });
-          
-          // 增加已处理帧数
-          processedFrames++;
-          
-          // 当所有帧都处理完成后，更新状态
-          if (processedFrames === totalFramesToConvert) {
-            isConverting.value = false;
-            addInfoMessage(`GIF转换完成，共转换 ${processedFrames} 帧`, 'info');
-          }
-        };
-        
-        // 使用分解出来的帧作为源
-        img.src = frames.value[index].url;
-      })(i);
+
+    for (let index = 0; index < sourceFrames.length; index++) {
+      if (!gifFile.value) return;
+      const frameUrl = await renderConvertedFrame(sourceFrames[index].url, outputType, index);
+      conversionResults.value.push({
+        name: `${fileBaseName}_frame_${index + 1}.${outputType}`,
+        url: frameUrl
+      });
     }
-    
-    // 如果没有帧需要处理，直接完成
-    if (totalFramesToConvert === 0) {
-      isConverting.value = false;
-      addInfoMessage('GIF转换完成，共转换 0 帧', 'info');
-    }
+    addInfoMessage(`GIF转换完成，共转换 ${sourceFrames.length} 帧`, 'info');
   } catch (error) {
     console.error('转换GIF失败:', error);
-    addInfoMessage('转换GIF失败', 'error');
+    releaseUrls(conversionResults.value);
+    conversionResults.value = [];
+    addInfoMessage(`转换GIF失败: ${error.message || String(error)}`, 'error');
+  } finally {
     isConverting.value = false;
+  }
+}
+
+async function renderConvertedFrame(sourceUrl, outputType, index) {
+  const canvas = document.createElement('canvas');
+  let image = null;
+
+  try {
+    image = await loadImage(sourceUrl);
+    canvas.width = 200;
+    canvas.height = 200;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    context.font = '16px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'bottom';
+    context.fillText(`帧 ${index + 1}`, canvas.width / 2, canvas.height - 10);
+    const blob = await canvasToBlob(canvas, getOutputMimeType(outputType));
+    return URL.createObjectURL(blob);
+  } finally {
+    releaseImage(image);
+    releaseCanvas(canvas);
+  }
+}
+
+function getOutputMimeType(outputType) {
+  return outputType === 'jpg' ? 'image/jpeg' : `image/${outputType}`;
+}
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('无法加载GIF帧'));
+    image.src = url;
+  });
+}
+
+function releaseImage(image) {
+  if (image) {
+    image.onload = null;
+    image.onerror = null;
+    image.src = '';
   }
 }
 
@@ -500,11 +523,17 @@ async function downloadAsZip() {
       const { invoke } = await import('@tauri-apps/api/core');
       console.log('invoke API导入成功');
       
-      // 准备要打包的文件列表
-      const filesToZip = conversionResults.value.map((result, index) => ({
-        name: result.name,
-        url: result.url
-      }));
+      // 仅在明确下载ZIP时逐帧转成data URL，且限制总大小，避免常驻大字符串。
+      const filesToZip = [];
+      let totalZipBytes = 0;
+      for (const frame of conversionResults.value) {
+        const dataUrl = await blobUrlToDataUrl(frame.url);
+        totalZipBytes += Math.floor((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75);
+        if (totalZipBytes > MAX_ZIP_BYTES) {
+          throw new Error(`ZIP内容超过 ${formatFileSize(MAX_ZIP_BYTES)} 限制`);
+        }
+        filesToZip.push({ name: frame.name, url: dataUrl });
+      }
       
       console.log('调用zip_files命令');
       const result = await invoke('zip_files', {
@@ -531,6 +560,19 @@ async function downloadAsZip() {
   } finally {
     isDownloading.value = false;
   }
+}
+
+async function blobUrlToDataUrl(url) {
+  const blob = await fetch(url).then((response) => {
+    if (!response.ok) throw new Error('无法读取转换结果');
+    return response.blob();
+  });
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('无法读取转换结果'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 // 格式化文件大小
@@ -566,6 +608,14 @@ function addInfoMessage(content, type = 'info') {
     }
   }, 100);
 }
+
+onUnmounted(() => {
+  if (gifFile.value?.previewUrl) {
+    URL.revokeObjectURL(gifFile.value.previewUrl);
+  }
+  releaseUrls(frames.value);
+  releaseUrls(conversionResults.value);
+});
 </script>
 
 <style scoped>
