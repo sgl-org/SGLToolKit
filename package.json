@@ -1,11 +1,11 @@
 {
   "name": "sgltoolkit",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run build:csidecar && vite build",
+    "build": "vite build",
     "build:csidecar": "cd src\\sgl_font_conv\\source && make && copy /Y sgl_font_conv.exe ..\\..\\..\\src-tauri\\binaries\\sgl_font_conv-x86_64-pc-windows-msvc.exe",
     "test:image-conversion": "node tests/imageConversion.test.js",
     "preview": "vite preview",

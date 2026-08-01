@@ -146,12 +146,25 @@
             <label class="form-label">杂项</label>
             <div class="misc-container">
               <div class="misc-item">
-                <input v-model="combineAsArray" type="checkbox" class="form-checkbox">
+                <input v-model="combineAsArray" type="checkbox" class="form-checkbox" :disabled="batchSingleBin">
                 <span>组合为数组</span>
               </div>
               <div class="misc-item">
                 <input v-model="swapBytes" type="checkbox" class="form-checkbox">
                 <span>交换字节</span>
+              </div>
+              <div
+                class="misc-item"
+                :class="{ 'misc-item-muted': outputFormat !== 'bin' }"
+                title="仅 bin 导出有效，按原图文件名逐张生成 .bin"
+              >
+                <input
+                  v-model="batchSingleBin"
+                  type="checkbox"
+                  class="form-checkbox"
+                  :disabled="outputFormat !== 'bin'"
+                >
+                <span>批量单图片 BIN 生成</span>
               </div>
             </div>
           </div>
@@ -265,11 +278,13 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   ConversionCancelledError,
   collectCCode,
+  collectBatchSingleBinNameIssues,
   convertImages,
   createBinaryChunks,
   createCCodeChunks,
   createImageThumbnail,
-  releasePreviewUrls
+  releasePreviewUrls,
+  validateBatchSingleBinNames
 } from '../utils/imageConversion';
 
 // 响应式数据
@@ -283,6 +298,7 @@ const arrayName = ref('img_xxx');
 const outputFolder = ref('');
 const binStartAddress = ref('0x0000');
 const combineAsArray = ref(true);
+const batchSingleBin = ref(false);
 
 // 监听binStartAddress变化，自动添加0x前缀并验证是否为合法十六进制
 watch(binStartAddress, (newValue) => {
@@ -356,6 +372,15 @@ function loadSettings() {
       if (settings.binStartAddress) binStartAddress.value = settings.binStartAddress;
       if (settings.combineAsArray !== undefined) combineAsArray.value = settings.combineAsArray;
       if (settings.swapBytes !== undefined) swapBytes.value = settings.swapBytes;
+      if (settings.batchSingleBin !== undefined) batchSingleBin.value = settings.batchSingleBin;
+    }
+
+    // 批量单图片 BIN 生成仅对 bin 输出有效，且开启时不允许组合为数组
+    if (outputFormat.value !== 'bin') {
+      batchSingleBin.value = false;
+    }
+    if (batchSingleBin.value) {
+      combineAsArray.value = false;
     }
   } catch (error) {
     console.error('加载设置失败:', error);
@@ -375,7 +400,8 @@ function saveSettings() {
       outputFolder: outputFolder.value,
       binStartAddress: binStartAddress.value,
       combineAsArray: combineAsArray.value,
-      swapBytes: swapBytes.value
+      swapBytes: swapBytes.value,
+      batchSingleBin: batchSingleBin.value
     };
     localStorage.setItem('sgltoolkit-settings', JSON.stringify(settings));
   } catch (error) {
@@ -384,7 +410,7 @@ function saveSettings() {
 }
 
 // 监听设置变化
-watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes], (current, previous) => {
+watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes, batchSingleBin], (current, previous) => {
   saveSettings();
 
   // 像素格式变化会使已有结果失效。只清理旧结果，不在后台重复解码所有图片。
@@ -400,12 +426,27 @@ watch([colorFormat, outputFormat, compression, enableTransparentFill, transparen
   }
 });
 
+// 批量单图片 BIN 模式联动：仅 bin 输出可勾选；开启时强制取消“组合为数组”
+watch([outputFormat, batchSingleBin], ([newOutputFormat]) => {
+  if (newOutputFormat !== 'bin' && batchSingleBin.value) {
+    batchSingleBin.value = false;
+  }
+  if (batchSingleBin.value && combineAsArray.value) {
+    combineAsArray.value = false;
+  }
+});
+
 // 初始化时加载设置
 loadSettings();
 
 // 计算属性
 const canConvert = computed(() => {
   return imageFiles.value.length > 0;
+});
+
+// 批量单图片 BIN 模式是否生效（仅 bin 输出有效）
+const batchSingleBinActive = computed(() => {
+  return outputFormat.value === 'bin' && batchSingleBin.value;
 });
 
 // 计算所有图片的总大小
@@ -552,6 +593,20 @@ async function convertImage() {
 
   const runId = ++conversionRunId;
   const images = imageFiles.value.map(({ path, name, width, height }) => ({ path, name, width, height }));
+
+  // 批量单图片 BIN 模式下校验原始图片命名
+  if (batchSingleBinActive.value && !validateBatchSingleBinNames(images)) {
+    const { invalidNames, duplicateNames } = collectBatchSingleBinNameIssues(images);
+    addInfoMessage('错误：批量单图片 BIN 生成功能要求图片文件名去掉扩展名后，必须符合 C 标识符规则（仅字母、数字、下划线，且不能以数字开头）。', 'error');
+    if (invalidNames.length > 0) {
+      addInfoMessage(`以下图片命名不规范：\n${invalidNames.join('\n')}`, 'error');
+    }
+    if (duplicateNames.length > 0) {
+      addInfoMessage(`以下图片名称重复，无法生成唯一的结构体名和 BIN 文件名：\n${duplicateNames.join('\n')}`, 'error');
+    }
+    return;
+  }
+
   const settings = {
     format: colorFormat.value,
     outputFormat: outputFormat.value,
@@ -561,7 +616,8 @@ async function convertImage() {
     arrayName: arrayName.value,
     binStartAddress: binStartAddress.value,
     combineAsArray: combineAsArray.value,
-    swapBytes: swapBytes.value
+    swapBytes: swapBytes.value,
+    batchSingleBin: batchSingleBinActive.value
   };
   let converted = null;
   let published = false;
@@ -1221,15 +1277,16 @@ h2 {
 .misc-container {
   display: flex;
   flex-direction: row;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 8px 10px;
   border: 1px solid #ddd;
   border-radius: 6px;
   background: white;
   box-sizing: border-box;
-  height: 36px;
+  min-height: 36px;
   width: 100%;
 }
 
@@ -1237,6 +1294,10 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.misc-item-muted {
+  opacity: 0.6;
 }
 
 .misc-item span {
