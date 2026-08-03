@@ -210,7 +210,17 @@
 
     <!-- 转换结果 -->
     <div v-if="conversionResults.length > 0" class="result-section">
-      <h4>转换结果</h4>
+      <div class="result-section-header">
+        <h4>转换结果</h4>
+        <button
+          class="download-all-btn"
+          @click="downloadAllResults"
+          :disabled="isDownloadingAll"
+          title="将全部结果文件保存到输出文件夹"
+        >
+          {{ isDownloadingAll ? '下载中...' : '全部下载' }}
+        </button>
+      </div>
       <div class="result-container">
         <div
           v-for="(result, index) in conversionResults"
@@ -323,6 +333,7 @@ watch(binStartAddress, (newValue) => {
 });
 const swapBytes = ref(false);
 const isConverting = ref(false);
+const isDownloadingAll = ref(false);
 const infoMessages = ref([]);
 const infoMessagesRef = ref(null);
 const showCopyTip = ref(false);
@@ -776,22 +787,67 @@ async function downloadResult(result) {
     return;
   }
 
-  const fileName = getOutputFileName(result);
-  const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
-  const filePath = outputFolder.value + separator + fileName;
+  const filePath = getResultFilePath(result);
 
   try {
-    if (result.kind === 'bin') {
-      await writeBinaryResult(filePath, result);
-    } else if (result.kind === 'c') {
-      await writeCResult(filePath, result);
-    } else {
-      await writeTextFile(filePath, result.code);
-    }
+    await writeResultToPath(filePath, result);
     addInfoMessage(`文件已保存：${filePath}`, 'info');
   } catch (err) {
     console.error('下载失败：', err);
     addInfoMessage(`文件写入失败：${err.message || String(err)}`, 'error');
+  }
+}
+
+// 全部下载：将转换生成的所有结果文件保存到输出文件夹
+async function downloadAllResults() {
+  if (!outputFolder.value) {
+    addInfoMessage('请先选择输出文件夹', 'error');
+    return;
+  }
+  if (isDownloadingAll.value) return;
+
+  isDownloadingAll.value = true;
+  const failedPaths = [];
+  let successCount = 0;
+
+  try {
+    for (const result of conversionResults.value) {
+      const filePath = getResultFilePath(result);
+      try {
+        await writeResultToPath(filePath, result);
+        successCount += 1;
+      } catch (err) {
+        console.error('下载失败：', err);
+        failedPaths.push(filePath);
+      }
+    }
+
+    if (failedPaths.length === 0) {
+      addInfoMessage(`全部下载完成，共保存 ${successCount} 个文件到 ${outputFolder.value}`, 'info');
+    } else {
+      addInfoMessage(
+        `全部下载完成：${successCount} 个成功，${failedPaths.length} 个失败：\n${failedPaths.join('\n')}`,
+        'error'
+      );
+    }
+  } finally {
+    isDownloadingAll.value = false;
+  }
+}
+
+function getResultFilePath(result) {
+  const fileName = getOutputFileName(result);
+  const separator = outputFolder.value.endsWith('/') || outputFolder.value.endsWith('\\') ? '' : '/';
+  return outputFolder.value + separator + fileName;
+}
+
+async function writeResultToPath(filePath, result) {
+  if (result.kind === 'bin') {
+    await writeBinaryResult(filePath, result);
+  } else if (result.kind === 'c') {
+    await writeCResult(filePath, result);
+  } else {
+    await writeTextFile(filePath, result.code);
   }
 }
 
@@ -1351,6 +1407,38 @@ h2 {
   font-weight: 500;
 }
 
+.result-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.result-section-header h4 {
+  margin: 0;
+}
+
+.download-all-btn {
+  background: transparent;
+  border: 1px solid #52c41a;
+  color: #52c41a;
+  padding: 4px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.download-all-btn:hover:not(:disabled) {
+  background: #52c41a;
+  color: white;
+}
+
+.download-all-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .result-container {
   display: flex;
   flex-direction: column;
@@ -1700,6 +1788,16 @@ html.dark .result-section {
 
 html.dark .result-section h4 {
   color: #e0e0e0;
+}
+
+html.dark .download-all-btn {
+  border-color: #52c41a;
+  color: #52c41a;
+}
+
+html.dark .download-all-btn:hover:not(:disabled) {
+  background: #52c41a;
+  color: white;
 }
 
 html.dark .result-item {
