@@ -23,6 +23,7 @@ src/sgl_font_conv/source/-p/
 
 # Rust/Tauri build artifacts
 src-tauri/target/
+publish/
 
 # Editor directories and files
 .vscode/*
