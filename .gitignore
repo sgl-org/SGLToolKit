@@ -23,7 +23,6 @@ src/sgl_font_conv/source/-p/
 
 # Rust/Tauri build artifacts
 src-tauri/target/
-src-tauri/binaries/
 publish/
 
 # Editor directories and files
