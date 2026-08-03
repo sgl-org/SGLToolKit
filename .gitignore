@@ -23,10 +23,13 @@ src/sgl_font_conv/source/-p/
 
 # Rust/Tauri build artifacts
 src-tauri/target/
+publish/
+
+# Local toolchain notes (machine-specific paths)
+TOOLCHAIN.md
 
 # Editor directories and files
 .vscode/*
-!.vscode/extensions.json
 .idea
 .DS_Store
 *.suo
