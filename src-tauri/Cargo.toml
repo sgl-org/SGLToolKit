@@ -15,6 +15,8 @@ name = "sgltoolkit_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
+# 发布构建必须启用：cargo build --release --features custom-protocol
+# （缺少该 feature 时 release 版仍会加载 devUrl；tauri dev 则不要启用）
 custom-protocol = ["tauri/custom-protocol"]
 
 [build-dependencies]
