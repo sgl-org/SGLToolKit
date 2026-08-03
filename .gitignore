@@ -25,6 +25,9 @@ src/sgl_font_conv/source/-p/
 src-tauri/target/
 publish/
 
+# Local toolchain notes (machine-specific paths)
+TOOLCHAIN.md
+
 # Editor directories and files
 .vscode/*
 .idea
