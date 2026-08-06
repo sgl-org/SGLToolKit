@@ -93,8 +93,8 @@
           <option value="RGB565">RGB565</option>
           <option value="RGB332">RGB332</option>
           <option value="ARGB8888">ARGB8888</option>
-          <option value="ARGB4444">ARGB4444</option>
-          <option value="ARGB2222">ARGB2222</option>
+<option value="ARGB4444">ARGB4444</option>
+              <option value="ARGB2222">ARGB2222</option>
             </select>
           </div>
           <div class="setting-item">
@@ -109,6 +109,7 @@
             <select v-model="compression" class="form-select">
               <option value="none">无压缩</option>
               <option value="rle">RLE压缩</option>
+              <option value="qoi">QOI压缩 (仅RGB565)</option>
             </select>
           </div>
           <div class="setting-item">
@@ -393,6 +394,10 @@ function loadSettings() {
     if (batchSingleBin.value) {
       combineAsArray.value = false;
     }
+    // QOI 压缩仅支持 RGB565
+    if (compression.value === 'qoi' && colorFormat.value !== 'RGB565') {
+      colorFormat.value = 'RGB565';
+    }
   } catch (error) {
     console.error('加载设置失败:', error);
   }
@@ -421,7 +426,19 @@ function saveSettings() {
 }
 
 // 监听设置变化
+// 若颜色格式切离 RGB565，禁用 QOI 压缩
+watch(colorFormat, (newFormat) => {
+  if (newFormat !== 'RGB565' && compression.value === 'qoi') {
+    compression.value = 'none';
+  }
+});
+
 watch([colorFormat, outputFormat, compression, enableTransparentFill, transparentFillColor, arrayName, outputFolder, binStartAddress, combineAsArray, swapBytes, batchSingleBin], (current, previous) => {
+  // QOI 压缩仅支持 RGB565
+  if (compression.value === 'qoi' && colorFormat.value !== 'RGB565') {
+    colorFormat.value = 'RGB565';
+    return;
+  }
   saveSettings();
 
   // 像素格式变化会使已有结果失效。只清理旧结果，不在后台重复解码所有图片。
