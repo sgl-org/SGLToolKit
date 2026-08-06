@@ -90,10 +90,10 @@
             <label class="form-label">颜色格式</label>
             <select v-model="colorFormat" class="form-select">
               <option value="RGB888">RGB888</option>
-          <option value="RGB565">RGB565</option>
-          <option value="RGB332">RGB332</option>
-          <option value="ARGB8888">ARGB8888</option>
-<option value="ARGB4444">ARGB4444</option>
+              <option value="RGB565">RGB565</option>
+              <option value="RGB332">RGB332</option>
+              <option value="ARGB8888">ARGB8888</option>
+              <option value="ARGB4444">ARGB4444</option>
               <option value="ARGB2222">ARGB2222</option>
             </select>
           </div>
