@@ -407,11 +407,12 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, "    .table = font_table,\n");
     fprintf(fp, "    .font_table_size = SGL_ARRAY_SIZE(font_table),\n");
     fprintf(fp, "    .font_height = %d,\n", font->font_height);
-    fprintf(fp, "    .base_line = %d,\n", font->base_line);
-    fprintf(fp, "    .bpp = %d,\n", ctx->bpp);
-    fprintf(fp, "    .compress = %d,\n", should_compress(ctx->bpp, ctx->compress) ? 1 : 0);
     fprintf(fp, "    .unicode = font_unicode,\n");
     fprintf(fp, "    .unicode_num = SGL_ARRAY_SIZE(font_unicode),\n");
+    fprintf(fp, "    .base_line = %d,\n", font->base_line);
+    fprintf(fp, "    .bpp = %d,\n", ctx->bpp);
+    fprintf(fp, "    .format = %s,\n",
+            should_compress(ctx->bpp, ctx->compress) ? "SGL_FONT_FMT_COMPRESSED" : "SGL_FONT_FMT_NORMAL");
     fprintf(fp, "};\n");
 
     /* Build macro name again for the closing #endif (macro_name is still in scope) */
