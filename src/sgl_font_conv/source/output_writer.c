@@ -59,6 +59,40 @@ static uint8_t *render_glyph_bitmap(const glyph_t *g, int bpp, int compress_flag
     return buf;
 }
 
+/* Render one glyph into a uniform canvas (EXT_FLASH_FIXED only):
+ * every glyph slot must be identical in size, so the glyph is drawn
+ * at its own bearing position inside the shared canvas. Raw packing only,
+ * fixed fonts cannot be compressed. */
+static uint8_t *render_glyph_canvas(const glyph_t *g, int bpp,
+                                    int canvas_w, int canvas_h,
+                                    int dx, int dy, size_t *out_len)
+{
+    size_t pixel_count = (size_t)canvas_w * (size_t)canvas_h;
+
+    /* Zero-filled canvas, then place the glyph pixels at (dx, dy) */
+    uint8_t *qpixels = (uint8_t *)calloc(pixel_count > 0 ? pixel_count : 1, 1);
+    for (int y = 0; y < g->box_h; y++) {
+        for (int x = 0; x < g->box_w; x++) {
+            qpixels[(size_t)(dy + y) * canvas_w + dx + x] =
+                quantize_pixel(g->pixels[(size_t)y * g->box_w + x], bpp);
+        }
+    }
+
+    size_t buf_cap = 128 + pixel_count * 2;
+    uint8_t *buf = (uint8_t *)calloc(1, buf_cap);
+    bitstream_t bs;
+    bitstream_init(&bs, buf, buf_cap);
+
+    for (size_t i = 0; i < pixel_count; i++) {
+        bitstream_write_bits(&bs, qpixels[i], bpp);
+    }
+
+    free(qpixels);
+
+    *out_len = bitstream_byte_index(&bs);
+    return buf;
+}
+
 /* Find glyph index in font->glyphs by codepoint (binary search, glyphs sorted) */
 static int find_glyph_index(const font_data_t *font, uint32_t code)
 {
@@ -182,14 +216,44 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     int flash = ctx->flash;
     int fixed = ctx->flash_fixed;
 
+    /* ---- Fixed fonts: compute the union box used as the uniform canvas.
+     * Glyphs rarely share identical metrics, so each glyph is drawn at its
+     * own bearing position inside this shared canvas instead. ---- */
+    int canvas_w = 0, canvas_h = 0, canvas_x0 = 0, canvas_y0 = 0;
+    if (fixed && glyph_count > 0) {
+        int min_x = font->glyphs[0].ofs_x;
+        int max_x = font->glyphs[0].ofs_x + font->glyphs[0].box_w;
+        int min_y = font->glyphs[0].ofs_y;
+        int max_y = font->glyphs[0].ofs_y + font->glyphs[0].box_h;
+        for (size_t i = 1; i < glyph_count; i++) {
+            const glyph_t *g = &font->glyphs[i];
+            if (g->ofs_x < min_x) min_x = g->ofs_x;
+            if (g->ofs_x + g->box_w > max_x) max_x = g->ofs_x + g->box_w;
+            if (g->ofs_y < min_y) min_y = g->ofs_y;
+            if (g->ofs_y + g->box_h > max_y) max_y = g->ofs_y + g->box_h;
+        }
+        canvas_x0 = min_x;
+        canvas_y0 = min_y;
+        canvas_w = max_x - min_x;
+        canvas_h = max_y - min_y;
+    }
+
     /* ---- Phase 1: compile all glyph bitmaps ---- */
     compiled_glyph_t *compiled = (compiled_glyph_t *)calloc(glyph_count, sizeof(compiled_glyph_t));
     if (!compiled) return -1;
 
     size_t total_bitmap_size = 0;
     for (size_t i = 0; i < glyph_count; i++) {
-        compiled[i].bitmap_data = render_glyph_bitmap(
-            &font->glyphs[i], ctx->bpp, ctx->compress, &compiled[i].bitmap_len);
+        if (fixed) {
+            const glyph_t *g = &font->glyphs[i];
+            compiled[i].bitmap_data = render_glyph_canvas(
+                g, ctx->bpp, canvas_w, canvas_h,
+                g->ofs_x - canvas_x0, g->ofs_y - canvas_y0,
+                &compiled[i].bitmap_len);
+        } else {
+            compiled[i].bitmap_data = render_glyph_bitmap(
+                &font->glyphs[i], ctx->bpp, ctx->compress, &compiled[i].bitmap_len);
+        }
         compiled[i].bitmap_offset = total_bitmap_size;
         total_bitmap_size += compiled[i].bitmap_len;
     }
@@ -201,25 +265,11 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
             goto fail;
         }
 
-        /* Fixed fonts need uniform glyph metrics: one slot per glyph,
+        /* Fixed fonts use uniform slots: one canvas-sized slot per glyph,
          * runtime computes the offset as ch_index x glyph bytes */
-        size_t glyph_bytes = 0;
-        if (fixed) {
-            const glyph_t *g0 = &font->glyphs[0];
-            for (size_t i = 1; i < glyph_count; i++) {
-                const glyph_t *g = &font->glyphs[i];
-                if (g->box_w != g0->box_w || g->box_h != g0->box_h ||
-                    g->ofs_x != g0->ofs_x || g->ofs_y != g0->ofs_y ||
-                    g->adv_w != g0->adv_w) {
-                    fprintf(stderr,
-                            "Error: --fixed requires identical glyph metrics, "
-                            "but U+%04X differs from U+%04X\n",
-                            g->code, g0->code);
-                    goto fail;
-                }
-            }
-            glyph_bytes = ((size_t)g0->box_w * (size_t)g0->box_h * ctx->bpp + 7) / 8;
-        }
+        size_t glyph_bytes = fixed
+            ? ((size_t)canvas_w * (size_t)canvas_h * ctx->bpp + 7) / 8
+            : 0;
 
         FILE *fb = fopen(ctx->bin_path, "wb");
         if (!fb) {
@@ -351,11 +401,17 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     if (fixed) {
         /* EXT_FLASH_FIXED: every glyph shares the same metrics, the table
          * keeps a single shared entry (table[0]); glyph offset is computed
-         * as ch_index x glyph bytes at runtime */
-        const glyph_t *g0 = &font->glyphs[0];
+         * as ch_index x glyph bytes at runtime. The shared box is the
+         * union canvas, adv_w is uniform (max of all glyphs, after
+         * smart-mono/spacing adjustments). */
+        int uni_adv_w = 0;
+        for (size_t i = 0; i < glyph_count; i++) {
+            if (font->glyphs[i].adv_w > uni_adv_w)
+                uni_adv_w = font->glyphs[i].adv_w;
+        }
         fprintf(fp, "\nstatic const sgl_font_table_t font_table[] = {\n");
         fprintf(fp, "    {.bitmap_index = 0, .adv_w = %d, .box_w = %d, .box_h = %d, .ofs_x = %d, .ofs_y = %d}\n",
-                g0->adv_w, g0->box_w, g0->box_h, g0->ofs_x, g0->ofs_y);
+                uni_adv_w, canvas_w, canvas_h, canvas_x0, canvas_y0);
         fprintf(fp, "};\n\n");
     } else {
     /* font_table entries must follow cmap subtable order, with dummy entries

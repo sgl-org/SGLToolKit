@@ -52,8 +52,8 @@
           </div>
           <div class="setting-item">
             <label class="setting-label">启用压缩</label>
-            <div class="setting-checkbox-box">
-              <input v-model="compress" type="checkbox" />
+            <div class="setting-checkbox-box" :class="{ disabled: flashFixed }">
+              <input v-model="compress" type="checkbox" :disabled="flashFixed" />
               <span>压缩</span>
             </div>
           </div>
@@ -62,6 +62,15 @@
             <div class="setting-checkbox-box">
               <input v-model="smartMono" type="checkbox" />
               <span>等宽</span>
+            </div>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">外部字体</label>
+            <div class="setting-checkbox-box">
+              <input v-model="flashFont" type="checkbox" />
+              <span>Flash</span>
+              <input v-if="flashFont" v-model="flashFixed" type="checkbox" title="外部等宽（所有字形度量一致）" />
+              <span v-if="flashFont">等宽</span>
             </div>
           </div>
           <div class="setting-item">
@@ -263,6 +272,8 @@ const iconFontUrl = ref('');
 const align = ref(1);
 const compress = ref(false);
 const smartMono = ref(false);
+const flashFont = ref(false);
+const flashFixed = ref(false);
 const charSpacing = ref(0);
 const isConverting = ref(false);
 const infoMessagesRef = ref(null);
@@ -271,6 +282,19 @@ const showCopyTip = ref(false);
 
 const canConvert = computed(() => {
   return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
+});
+
+/* 勾选外部字体时默认启用等宽，用户可手动取消；取消勾选时复位 */
+watch(flashFont, (val) => {
+  flashFixed.value = val;
+});
+
+/* 外部等宽字体按 ch_index x 字形字节数计算偏移，不允许压缩 */
+watch(flashFixed, (val) => {
+  if (val && compress.value) {
+    compress.value = false;
+    addInfoMessage('外部等宽字体不支持压缩，已自动取消压缩选项', 'info');
+  }
 });
 
 /* ---------- 字体名称自动生成 ---------- */
@@ -588,12 +612,19 @@ async function convertFont() {
       }
     }
 
-    if (compress.value) {
+    if (compress.value && !flashFixed.value) {
       args.push('--compress');
     }
 
     if (smartMono.value) {
       args.push('--smart-mono');
+    }
+
+    if (flashFont.value) {
+      args.push('--flash');
+      if (flashFixed.value) {
+        args.push('--fixed');
+      }
     }
 
     if (charSpacing.value > 0) {
@@ -681,6 +712,12 @@ async function convertFont() {
       }
     } else {
       addInfoMessage('转换成功！', 'info');
+    }
+
+    // 外部字体会额外生成同名的 .bin 位图文件
+    if (flashFont.value) {
+      const binPath = outputFullPath.replace(/\.c$/i, '.bin');
+      addInfoMessage(`已生成外部字体位图文件: ${binPath}`, 'info');
     }
 
   } catch (err) {
@@ -871,6 +908,11 @@ h2 {
 .setting-checkbox-box span {
   font-size: 14px;
   color: #333;
+}
+
+.setting-checkbox-box.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .custom-chars-textarea {

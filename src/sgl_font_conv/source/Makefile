@@ -1,5 +1,10 @@
-CC      = C:/Users/MLoong/scoop/apps/mingw/current/bin/gcc
-AR      = C:/Users/MLoong/scoop/apps/mingw/current/bin/ar
+# Default to gcc/ar from PATH; override with:
+#   make CC=/path/to/gcc AR=/path/to/ar
+# (CC ?= cannot replace make's built-in "CC = cc" default, so check origin)
+ifeq ($(origin CC),default)
+CC = gcc
+endif
+AR ?= ar
 CFLAGS  = -O2 -Wall -std=c99
 TARGET  = sgl_font_conv
 
