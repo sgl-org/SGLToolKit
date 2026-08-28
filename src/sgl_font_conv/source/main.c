@@ -39,6 +39,11 @@ static void print_usage(const char *prog)
         "  --compress            Enable RLE compression (bpp 2/4 only)\n"
         "  --smart-mono           Enable smart monospace (group by script)\n"
         "  --spacing <px>         Extra pixel spacing between characters (default 0)\n"
+        "  --flash               External flash font: bitmap is written to a .bin file\n"
+        "                        (same name as --output, .bin extension) and the\n"
+        "                        generated font uses SGL_FONT_FMT_EXT_FLASH\n"
+        "  --fixed               With --flash: all glyphs must share identical metrics\n"
+        "                        (monospaced); uses SGL_FONT_FMT_EXT_FLASH_FIXED\n"
         "\n"
         "Example (single font):\n"
         "  %s --font font.otf --symbols-file chinese.txt --size 24 --bpp 4 --output out.c\n"
@@ -212,6 +217,8 @@ int main(int argc, char *argv[])
     int compress_flag = 0;
     int smart_mono_flag = 0;
     int spacing_val = 0;
+    int flash_flag = 0;
+    int flash_fixed_flag = 0;
 
     font_entry_t *font_head = NULL;
     font_entry_t *font_tail = NULL;
@@ -252,6 +259,10 @@ int main(int argc, char *argv[])
             smart_mono_flag = 1;
         } else if (strcmp(argv[i], "--spacing") == 0 && i + 1 < argc) {
             spacing_val = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--flash") == 0) {
+            flash_flag = 1;
+        } else if (strcmp(argv[i], "--fixed") == 0) {
+            flash_fixed_flag = 1;
         } else if (strcmp(argv[i], "--symbols") == 0 && i + 1 < argc) {
             if (!current_entry) {
                 fprintf(stderr, "Error: --symbols must follow a --font\n");
@@ -342,6 +353,17 @@ int main(int argc, char *argv[])
         free_font_entries(font_head);
         return 1;
     }
+    if (flash_fixed_flag && !flash_flag) {
+        fprintf(stderr, "Error: --fixed requires --flash\n");
+        free_font_entries(font_head);
+        return 1;
+    }
+    if (flash_fixed_flag && compress_flag) {
+        fprintf(stderr, "Error: --fixed cannot be combined with --compress "
+                        "(glyph offsets are computed from a uniform glyph size)\n");
+        free_font_entries(font_head);
+        return 1;
+    }
 
     /* Validate each font entry has codepoints */
     for (font_entry_t *e = font_head; e; e = e->next) {
@@ -417,6 +439,30 @@ int main(int argc, char *argv[])
     char *font_name = extract_font_name(output_path);
     ensure_parent_dir(output_path);
 
+    /* Derive the .bin path for external flash fonts: same location and
+     * basename as the C output file, with a .bin extension. */
+    char bin_path_buf[1024];
+    const char *bin_path = NULL;
+    if (flash_flag) {
+        const char *dot = strrchr(output_path, '.');
+        const char *sep = strrchr(output_path, '/');
+        const char *bsep = strrchr(output_path, '\\');
+        if (bsep && (!sep || bsep > sep)) sep = bsep;
+        size_t base_len = (dot && (!sep || dot > sep)) ? (size_t)(dot - output_path)
+                                                    : strlen(output_path);
+        if (base_len + 5 > sizeof(bin_path_buf)) {
+            fprintf(stderr, "Error: output path too long\n");
+            free(font_name);
+            font_render_free(&merged_font);
+            free_font_entries(font_head);
+            return 1;
+        }
+        memcpy(bin_path_buf, output_path, base_len);
+        memcpy(bin_path_buf + base_len, ".bin", 5);
+        bin_path = bin_path_buf;
+        ensure_parent_dir(bin_path);
+    }
+
     FILE *fp = fopen(output_path, "w");
     if (!fp) {
         fprintf(stderr, "Error: cannot open output file '%s'\n", output_path);
@@ -434,10 +480,14 @@ int main(int argc, char *argv[])
         .compress = compress_flag,
         .font_name = font_name,
         .smart_mono = smart_mono_flag,
-        .spacing = spacing_val
+        .spacing = spacing_val,
+        .flash = flash_flag,
+        .flash_fixed = flash_fixed_flag,
+        .bin_path = bin_path
     };
 
-    printf("Writing output to %s...\n", output_path);
+    printf("Writing output to %s%s%s...\n", output_path,
+           flash_flag ? " and " : "", flash_flag ? bin_path : "");
     if (write_sgl_font(fp, &writer) != 0) {
         fprintf(stderr, "Error: write failed\n");
         fclose(fp);

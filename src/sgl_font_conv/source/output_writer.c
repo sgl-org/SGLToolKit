@@ -179,6 +179,8 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     const font_data_t *font = ctx->font;
     const cmap_plan_t *cmap = ctx->cmap;
     size_t glyph_count = font->glyph_count;
+    int flash = ctx->flash;
+    int fixed = ctx->flash_fixed;
 
     /* ---- Phase 1: compile all glyph bitmaps ---- */
     compiled_glyph_t *compiled = (compiled_glyph_t *)calloc(glyph_count, sizeof(compiled_glyph_t));
@@ -190,6 +192,58 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
             &font->glyphs[i], ctx->bpp, ctx->compress, &compiled[i].bitmap_len);
         compiled[i].bitmap_offset = total_bitmap_size;
         total_bitmap_size += compiled[i].bitmap_len;
+    }
+
+    /* ---- Phase 1.2: external flash fonts write the bitmap blob to a .bin file ---- */
+    if (flash) {
+        if (!ctx->bin_path) {
+            fprintf(stderr, "Error: flash font requires a bin output path\n");
+            goto fail;
+        }
+
+        /* Fixed fonts need uniform glyph metrics: one slot per glyph,
+         * runtime computes the offset as ch_index x glyph bytes */
+        size_t glyph_bytes = 0;
+        if (fixed) {
+            const glyph_t *g0 = &font->glyphs[0];
+            for (size_t i = 1; i < glyph_count; i++) {
+                const glyph_t *g = &font->glyphs[i];
+                if (g->box_w != g0->box_w || g->box_h != g0->box_h ||
+                    g->ofs_x != g0->ofs_x || g->ofs_y != g0->ofs_y ||
+                    g->adv_w != g0->adv_w) {
+                    fprintf(stderr,
+                            "Error: --fixed requires identical glyph metrics, "
+                            "but U+%04X differs from U+%04X\n",
+                            g->code, g0->code);
+                    goto fail;
+                }
+            }
+            glyph_bytes = ((size_t)g0->box_w * (size_t)g0->box_h * ctx->bpp + 7) / 8;
+        }
+
+        FILE *fb = fopen(ctx->bin_path, "wb");
+        if (!fb) {
+            fprintf(stderr, "Error: cannot open bin file '%s'\n", ctx->bin_path);
+            goto fail;
+        }
+        for (size_t i = 0; i < glyph_count; i++) {
+            size_t len = fixed ? glyph_bytes : compiled[i].bitmap_len;
+            if (compiled[i].bitmap_len < len) {
+                fprintf(stderr, "Error: glyph U+%04X bitmap too small for fixed slot\n",
+                        font->glyphs[i].code);
+                fclose(fb);
+                goto fail;
+            }
+            if (fwrite(compiled[i].bitmap_data, 1, len, fb) != len) {
+                fprintf(stderr, "Error: failed to write bin file '%s'\n", ctx->bin_path);
+                fclose(fb);
+                goto fail;
+            }
+        }
+        fclose(fb);
+        printf("  Bitmap blob written to %s (%u glyph(s), %s)\n",
+               ctx->bin_path, (unsigned)glyph_count,
+               fixed ? "uniform slots" : "packed");
     }
 
     /* ---- Phase 1.5: smart monospace ---- */
@@ -257,7 +311,9 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, "#endif\n\n");
     fprintf(fp, "#if %s\n\n", macro_name);
 
-    /* ---- Phase 3: write font_bitmap[] ---- */
+    /* ---- Phase 3: write font_bitmap[] (skipped for external flash fonts,
+     * the bitmap blob lives in the .bin file instead) ---- */
+    if (!flash) {
     fprintf(fp, "static const uint8_t font_bitmap[] = {\n");
 
     for (size_t i = 0; i < glyph_count; i++) {
@@ -289,8 +345,19 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     }
 
     fprintf(fp, "};\n\n");
+    }
 
     /* ---- Phase 4: write font_table[] ---- */
+    if (fixed) {
+        /* EXT_FLASH_FIXED: every glyph shares the same metrics, the table
+         * keeps a single shared entry (table[0]); glyph offset is computed
+         * as ch_index x glyph bytes at runtime */
+        const glyph_t *g0 = &font->glyphs[0];
+        fprintf(fp, "\nstatic const sgl_font_table_t font_table[] = {\n");
+        fprintf(fp, "    {.bitmap_index = 0, .adv_w = %d, .box_w = %d, .box_h = %d, .ofs_x = %d, .ofs_y = %d}\n",
+                g0->adv_w, g0->box_w, g0->box_h, g0->ofs_x, g0->ofs_y);
+        fprintf(fp, "};\n\n");
+    } else {
     /* font_table entries must follow cmap subtable order, with dummy entries
      * for gaps in FORMAT0 subtables. This ensures tab_offset + (code - offset)
      * correctly indexes into font_table at runtime. */
@@ -335,9 +402,30 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     }
 
     fprintf(fp, "\n};\n\n");
+    } /* !fixed */
 
     /* ---- Phase 5: write unicode_list arrays and font_unicode[] ---- */
 
+    if (fixed) {
+        /* EXT_FLASH_FIXED: a single unicode entry covering all glyphs;
+         * the list index is the ch_index used to compute the blob offset */
+        uint32_t base = font->glyphs[0].code;
+        fprintf(fp, "static const uint16_t unicode_list_0[] = {\n");
+        for (size_t k = 0; k < glyph_count; k++) {
+            uint16_t delta = (uint16_t)(font->glyphs[k].code - base);
+            if (k % 8 == 0) fprintf(fp, "    ");
+            fprintf(fp, "0x%x", delta);
+            if (k < glyph_count - 1) fprintf(fp, ",");
+            if (k % 8 == 7 || k == glyph_count - 1) fprintf(fp, "\n");
+            else fprintf(fp, " ");
+        }
+        fprintf(fp, "};\n\n");
+
+        fprintf(fp, "static const sgl_font_unicode_t font_unicode[] = {\n");
+        fprintf(fp, "    { .offset = 0x%x, .len = %u, .list = unicode_list_0, .tab_offset = 0, }\n",
+                base, (unsigned)glyph_count);
+        fprintf(fp, "};\n\n");
+    } else {
     /* Write unicode_list_N arrays for sparse subtables */
     for (size_t st_idx = 0; st_idx < cmap->count; st_idx++) {
         const cmap_subtable_t *st = &cmap->subtables[st_idx];
@@ -400,10 +488,26 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     }
 
     fprintf(fp, "};\n\n");
+    } /* !fixed */
 
     /* ---- Phase 6: write sgl_font_t ---- */
+    if (flash) {
+        fprintf(fp, "extern int32_t %s_flash_read(uint32_t addr, void *buf, uint32_t len);\n\n",
+                ctx->font_name);
+    }
+
+    const char *fmt_str;
+    if (fixed) {
+        fmt_str = "SGL_FONT_FMT_EXT_FLASH_FIXED";
+    } else if (flash) {
+        fmt_str = "SGL_FONT_FMT_EXT_FLASH";
+    } else {
+        fmt_str = should_compress(ctx->bpp, ctx->compress)
+                      ? "SGL_FONT_FMT_COMPRESSED" : "SGL_FONT_FMT_NORMAL";
+    }
+
     fprintf(fp, "const sgl_font_t %s = {\n", ctx->font_name);
-    fprintf(fp, "    .bitmap = font_bitmap,\n");
+    fprintf(fp, "    .bitmap = %s,\n", flash ? "NULL" : "font_bitmap");
     fprintf(fp, "    .table = font_table,\n");
     fprintf(fp, "    .font_table_size = SGL_ARRAY_SIZE(font_table),\n");
     fprintf(fp, "    .font_height = %d,\n", font->font_height);
@@ -411,8 +515,14 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, "    .unicode_num = SGL_ARRAY_SIZE(font_unicode),\n");
     fprintf(fp, "    .base_line = %d,\n", font->base_line);
     fprintf(fp, "    .bpp = %d,\n", ctx->bpp);
-    fprintf(fp, "    .format = %s,\n",
-            should_compress(ctx->bpp, ctx->compress) ? "SGL_FONT_FMT_COMPRESSED" : "SGL_FONT_FMT_NORMAL");
+    fprintf(fp, "    .format = %s,\n", fmt_str);
+    if (flash) {
+        fprintf(fp, "#if (CONFIG_SGL_FLASH_FONT)\n");
+        fprintf(fp, "    .flash_read = %s_flash_read,\n", ctx->font_name);
+        fprintf(fp, "    .flash_addr = 0, /* offset of the %s blob in external flash */\n",
+                ctx->font_name);
+        fprintf(fp, "#endif\n");
+    }
     fprintf(fp, "};\n");
 
     /* Build macro name again for the closing #endif (macro_name is still in scope) */
@@ -425,4 +535,11 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     free(compiled);
 
     return 0;
+
+fail:
+    for (size_t i = 0; i < glyph_count; i++) {
+        free(compiled[i].bitmap_data);
+    }
+    free(compiled);
+    return -1;
 }

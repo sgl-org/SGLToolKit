@@ -13,6 +13,9 @@ typedef struct {
     const char        *font_name;  /* variable name for sgl_font_t */
     int                smart_mono;  /* enable smart monospace (group by script) */
     int                spacing;     /* extra pixel spacing between characters */
+    int                flash;       /* external flash font: bitmap goes to bin_path */
+    int                flash_fixed; /* flash font with uniform (monospaced) glyphs */
+    const char        *bin_path;   /* output path of the bitmap blob (.bin) */
 } writer_ctx_t;
 
 /* Write complete SGL font C source file to the given FILE handle. */
