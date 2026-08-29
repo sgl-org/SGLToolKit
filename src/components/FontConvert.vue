@@ -284,9 +284,11 @@ const canConvert = computed(() => {
   return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
 });
 
-/* 勾选外部字体时默认启用等宽，用户可手动取消；取消勾选时复位 */
+/* 勾选外部字体时默认不勾选等宽；取消勾选时复位 */
 watch(flashFont, (val) => {
-  flashFixed.value = val;
+  if (!val) {
+    flashFixed.value = false;
+  }
 });
 
 /* 外部等宽字体按 ch_index x 字形字节数计算偏移，不允许压缩 */
