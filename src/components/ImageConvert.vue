@@ -93,6 +93,7 @@
               <option value="RGB565">RGB565</option>
               <option value="RGB332">RGB332</option>
               <option value="ARGB8888">ARGB8888</option>
+              <option value="ARGB8565">ARGB8565</option>
               <option value="ARGB4444">ARGB4444</option>
               <option value="ARGB2222">ARGB2222</option>
             </select>
@@ -690,6 +691,7 @@ function getBytesPerPixel(format) {
     case 'RGB565': return 2;
     case 'RGB332': return 1;
     case 'ARGB8888': return 4;
+    case 'ARGB8565': return 3;
     case 'ARGB4444': return 2;
     case 'ARGB2222': return 1;
     default: return 3;

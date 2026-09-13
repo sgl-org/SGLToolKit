@@ -227,4 +227,22 @@ await assert.rejects(
   /仅支持RGB565/
 );
 
+// ARGB8565：3 字节/像素（RGB565 小端 + alpha），C 代码输出 SGL_PIXMAP_FMT_ARGB8565
+{
+  const code8565 = collectCCode({
+    infos: [
+      {
+        name: 'p',
+        width: 2,
+        height: 1,
+        bitmapName: 'p_bitmap',
+        bitmapData: new Uint8Array([0x00, 0xF8, 0xFF, 0xE0, 0x07, 0x80]) // 红(不透明) + 绿(半透明) 的 RGB565LE+alpha
+      }
+    ],
+    settings: { format: 'ARGB8565', compression: 'none', combineAsArray: false, arrayName: 'x' }
+  }, 4096);
+  assert.match(code8565, /SGL_PIXMAP_FMT_ARGB8565/);
+  assert.match(code8565, /0x00, 0xf8, 0xff, 0xe0, 0x07, 0x80/);
+}
+
 console.log('image conversion helpers: ok');

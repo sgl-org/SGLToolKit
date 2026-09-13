@@ -419,6 +419,10 @@ function encodeBitmap(rgba, pixelCount, settings) {
   const bytesPerPixel = getBytesPerPixel(format);
   const bitmapData = new Uint8Array(pixelCount * bytesPerPixel);
   const fillColor = settings.enableTransparentFill ? parseColor(settings.transparentFillColor) : null;
+  // 带 alpha 通道的格式保留原始 RGB，不做透明填充预混合，
+  // 否则渲染端按 alpha 再次混合会产生双重混合（颜色明显偏亮）。
+  const keepAlpha = format === 'ARGB8888' || format === 'ARGB8565'
+    || format === 'ARGB4444' || format === 'ARGB2222';
   let outputOffset = 0;
 
   for (let sourceOffset = 0; sourceOffset < rgba.length; sourceOffset += 4) {
@@ -427,7 +431,7 @@ function encodeBitmap(rgba, pixelCount, settings) {
     let blue = rgba[sourceOffset + 2];
     const alpha = rgba[sourceOffset + 3];
 
-    if (alpha < 255 && fillColor) {
+    if (alpha < 255 && fillColor && !keepAlpha) {
       const alphaFactor = alpha / 255;
       red = Math.round(red * alphaFactor + fillColor.r * (1 - alphaFactor));
       green = Math.round(green * alphaFactor + fillColor.g * (1 - alphaFactor));
@@ -459,6 +463,15 @@ function encodeBitmap(rgba, pixelCount, settings) {
         bitmapData[outputOffset++] = red;
         bitmapData[outputOffset++] = alpha;
         break;
+      case 'ARGB8565': {
+        const value = (Math.round(red / 255 * 31) << 11)
+          | (Math.round(green / 255 * 63) << 5)
+          | Math.round(blue / 255 * 31);
+        bitmapData[outputOffset++] = value & 0xFF;
+        bitmapData[outputOffset++] = (value >> 8) & 0xFF;
+        bitmapData[outputOffset++] = alpha;
+        break;
+      }
       case 'ARGB4444': {
         const value = (Math.round(alpha / 255 * 15) << 12)
           | (Math.round(red / 255 * 15) << 8)
@@ -496,16 +509,17 @@ function decodeBitmapPixel(source, offset, format, target, targetOffset) {
       break;
     case 'RGB565': {
       const value = source[offset] | (source[offset + 1] << 8);
-      red = ((value >> 11) & 0x1F) << 3;
-      green = ((value >> 5) & 0x3F) << 2;
-      blue = (value & 0x1F) << 3;
+      // 位复制(bit replication)回显：5bit 31→255，避免纯移位导致的预览偏暗
+      red = (((value >> 11) & 0x1F) << 3) | ((value >> 13) & 0x07);
+      green = (((value >> 5) & 0x3F) << 2) | ((value >> 11) & 0x03);
+      blue = ((value & 0x1F) << 3) | ((value >> 2) & 0x07);
       break;
     }
     case 'RGB332': {
       const value = source[offset];
-      red = ((value >> 5) & 0x07) << 5;
-      green = ((value >> 2) & 0x07) << 5;
-      blue = (value & 0x03) << 6;
+      red = (((value >> 5) & 0x07) << 5) | (((value >> 5) & 0x07) << 2) | (((value >> 5) & 0x07) >> 1);
+      green = (((value >> 2) & 0x07) << 5) | (((value >> 2) & 0x07) << 2) | (((value >> 2) & 0x07) >> 1);
+      blue = ((value & 0x03) << 6) | ((value & 0x03) << 4) | ((value & 0x03) << 2) | (value & 0x03);
       break;
     }
     case 'ARGB8888':
@@ -514,20 +528,28 @@ function decodeBitmapPixel(source, offset, format, target, targetOffset) {
       red = source[offset + 2];
       alpha = source[offset + 3];
       break;
+    case 'ARGB8565': {
+      const value = source[offset] | (source[offset + 1] << 8);
+      red = (((value >> 11) & 0x1F) << 3) | ((value >> 13) & 0x07);
+      green = (((value >> 5) & 0x3F) << 2) | ((value >> 11) & 0x03);
+      blue = ((value & 0x1F) << 3) | ((value >> 2) & 0x07);
+      alpha = source[offset + 2];
+      break;
+    }
     case 'ARGB4444': {
       const value = source[offset] | (source[offset + 1] << 8);
-      alpha = ((value >> 12) & 0x0F) << 4;
-      red = ((value >> 8) & 0x0F) << 4;
-      green = ((value >> 4) & 0x0F) << 4;
-      blue = (value & 0x0F) << 4;
+      alpha = (((value >> 12) & 0x0F) << 4) | ((value >> 12) & 0x0F);
+      red = (((value >> 8) & 0x0F) << 4) | ((value >> 8) & 0x0F);
+      green = (((value >> 4) & 0x0F) << 4) | ((value >> 4) & 0x0F);
+      blue = ((value & 0x0F) << 4) | (value & 0x0F);
       break;
     }
     case 'ARGB2222': {
       const value = source[offset];
-      alpha = ((value >> 6) & 0x03) << 6;
-      red = ((value >> 4) & 0x03) << 6;
-      green = ((value >> 2) & 0x03) << 6;
-      blue = (value & 0x03) << 6;
+      alpha = (((value >> 6) & 0x03) << 6) | (((value >> 6) & 0x03) << 4) | (((value >> 6) & 0x03) << 2) | ((value >> 6) & 0x03);
+      red = (((value >> 4) & 0x03) << 6) | (((value >> 4) & 0x03) << 4) | (((value >> 4) & 0x03) << 2) | ((value >> 4) & 0x03);
+      green = (((value >> 2) & 0x03) << 6) | (((value >> 2) & 0x03) << 4) | (((value >> 2) & 0x03) << 2) | ((value >> 2) & 0x03);
+      blue = ((value & 0x03) << 6) | ((value & 0x03) << 4) | ((value & 0x03) << 2) | (value & 0x03);
       break;
     }
     default:
@@ -924,6 +946,7 @@ function getBytesPerPixel(format) {
     case 'RGB565': return 2;
     case 'RGB332': return 1;
     case 'ARGB8888': return 4;
+    case 'ARGB8565': return 3;
     case 'ARGB4444': return 2;
     case 'ARGB2222': return 1;
     default: throw new Error(`不支持的颜色格式: ${format}`);
