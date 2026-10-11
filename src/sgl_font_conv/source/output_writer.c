@@ -1,6 +1,7 @@
 #include "output_writer.h"
 #include "bitstream.h"
 #include "rle_compress.h"
+#include "utf8.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -271,7 +272,7 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
             ? ((size_t)canvas_w * (size_t)canvas_h * ctx->bpp + 7) / 8
             : 0;
 
-        FILE *fb = fopen(ctx->bin_path, "wb");
+        FILE *fb = utf8_fopen(ctx->bin_path, "wb");
         if (!fb) {
             fprintf(stderr, "Error: cannot open bin file '%s'\n", ctx->bin_path);
             goto fail;

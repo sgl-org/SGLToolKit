@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SGLToolKit V2.0",
+        "title": "SGLToolKit V2.0.1",
         "width": 1240,
         "height": 900
       }

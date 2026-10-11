@@ -121,11 +121,11 @@ $(TARGET): $(FT_LIB) $(OBJS)
 
 # ---- Header dependencies ----
 main.o:          main.c utf8.h font_render.h cmap_builder.h output_writer.h
-font_render.o:   font_render.c font_render.h
+font_render.o:   font_render.c font_render.h utf8.h
 cmap_builder.o:  cmap_builder.c cmap_builder.h
 rle_compress.o:  rle_compress.c rle_compress.h bitstream.h
 bitstream.o:     bitstream.c bitstream.h
-output_writer.o: output_writer.c output_writer.h font_render.h cmap_builder.h bitstream.h rle_compress.h
+output_writer.o: output_writer.c output_writer.h font_render.h cmap_builder.h bitstream.h rle_compress.h utf8.h
 utf8.o:          utf8.c utf8.h
 
 # ---- Cleanup ----

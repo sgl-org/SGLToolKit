@@ -1,4 +1,5 @@
 #include "font_render.h"
+#include "utf8.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <stdlib.h>
@@ -30,9 +31,21 @@ int font_render_init(const char *font_path, int pixel_size,
         return -1;
     }
 
-    error = FT_New_Face(library, font_path, 0, &face);
+    /* Read the font file ourselves (UTF-8 path aware) and hand the memory
+     * block to FreeType: FT_New_Face uses ANSI file APIs on Windows and
+     * fails on non-ASCII (e.g. Chinese) paths. */
+    uint8_t *font_buf = NULL;
+    size_t font_size = 0;
+    if (utf8_read_whole_file(font_path, &font_buf, &font_size) != 0) {
+        fprintf(stderr, "Error: cannot read font file '%s'\n", font_path);
+        FT_Done_FreeType(library);
+        return -1;
+    }
+
+    error = FT_New_Memory_Face(library, font_buf, (FT_Long)font_size, 0, &face);
     if (error) {
         fprintf(stderr, "Error: cannot load font '%s' (%d)\n", font_path, error);
+        free(font_buf);
         FT_Done_FreeType(library);
         return -1;
     }
@@ -41,6 +54,7 @@ int font_render_init(const char *font_path, int pixel_size,
     if (error) {
         fprintf(stderr, "Error: FT_Set_Pixel_Sizes failed (%d)\n", error);
         FT_Done_Face(face);
+        free(font_buf);
         FT_Done_FreeType(library);
         return -1;
     }
@@ -48,6 +62,7 @@ int font_render_init(const char *font_path, int pixel_size,
     out->glyphs = (glyph_t *)calloc(count, sizeof(glyph_t));
     if (!out->glyphs) {
         FT_Done_Face(face);
+        free(font_buf);
         FT_Done_FreeType(library);
         return -1;
     }
@@ -96,6 +111,7 @@ int font_render_init(const char *font_path, int pixel_size,
             if (!g->pixels) {
                 font_render_free(out);
                 FT_Done_Face(face);
+                free(font_buf);
                 FT_Done_FreeType(library);
                 return -1;
             }
@@ -133,6 +149,7 @@ int font_render_init(const char *font_path, int pixel_size,
     out->base_line = -descent;
 
     FT_Done_Face(face);
+    free(font_buf); /* must outlive the face: FT_New_Memory_Face doesn't copy */
     FT_Done_FreeType(library);
     return 0;
 }

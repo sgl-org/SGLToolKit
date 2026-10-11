@@ -139,26 +139,10 @@ static char *extract_font_name(const char *output_path)
     return name;
 }
 
-/* Ensure parent directory exists (simple version for common cases) */
+/* Ensure parent directory exists (UTF-8 path aware) */
 static void ensure_parent_dir(const char *filepath)
 {
-    char *path = strdup(filepath);
-    char *last_sep = strrchr(path, '/');
-    if (!last_sep) last_sep = strrchr(path, '\\');
-    if (last_sep) {
-        *last_sep = '\0';
-#ifdef _WIN32
-        /* Use system mkdir on Windows */
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", path);
-        system(cmd);
-#else
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "mkdir -p \"%s\"", path);
-        system(cmd);
-#endif
-    }
-    free(path);
+    utf8_make_dirs(filepath);
 }
 
 /* Add codepoints to the current font entry */
@@ -463,7 +447,7 @@ int main(int argc, char *argv[])
         ensure_parent_dir(bin_path);
     }
 
-    FILE *fp = fopen(output_path, "w");
+    FILE *fp = utf8_fopen(output_path, "w");
     if (!fp) {
         fprintf(stderr, "Error: cannot open output file '%s'\n", output_path);
         free(font_name);
