@@ -86,6 +86,150 @@ async fn run_shell_command(_app: tauri::AppHandle, cmd: String, args: Vec<String
 }
 
 #[tauri::command]
+fn get_file_size(path: String) -> Result<u64, String> {
+    std::fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| format!("读取文件大小失败: {}", e))
+}
+
+// 移动/重命名文件（Windows 下目标已存在时直接覆盖）
+#[tauri::command]
+fn move_file(from: String, to: String) -> Result<(), String> {
+    std::fs::rename(&from, &to)
+        .map_err(|e| format!("覆盖目标文件失败: {}", e))
+}
+
+#[tauri::command]
+fn remove_file(path: String) -> Result<(), String> {
+    // 文件不存在时视为成功（清理临时文件的幂等处理）
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("删除文件失败: {}", e)),
+    }
+}
+
+// ffmpeg 进度事件负载
+#[derive(Clone, serde::Serialize)]
+struct FfmpegProgressPayload {
+    percent: f64,
+    time_str: String,
+}
+
+// 解析 "HH:MM:SS.xx" 为秒数
+fn parse_hms(s: &str) -> Option<f64> {
+    let mut parts = s.trim().split(':');
+    let h: f64 = parts.next()?.parse().ok()?;
+    let m: f64 = parts.next()?.parse().ok()?;
+    let sec: f64 = parts.next()?.parse().ok()?;
+    Some(h * 3600.0 + m * 60.0 + sec)
+}
+
+// 从 ffmpeg stderr 中解析 "Duration: 00:01:23.45"
+fn parse_ffmpeg_duration(stderr: &str) -> Option<f64> {
+    let start = stderr.find("Duration: ")? + "Duration: ".len();
+    let raw = stderr.get(start..start + 11)?;
+    if raw.starts_with("N/A") {
+        return None;
+    }
+    parse_hms(raw)
+}
+
+// 从 ffmpeg 进度行中提取 time= 并向前端发送进度事件
+fn emit_ffmpeg_progress(app: &tauri::AppHandle, segment: &[u8], total_secs: Option<f64>) {
+    let text = String::from_utf8_lossy(segment);
+    let idx = match text.find("time=") {
+        Some(i) => i + 5,
+        None => return,
+    };
+    let raw = text[idx..text.len().min(idx + 12)].trim();
+    if let Some(secs) = parse_hms(raw) {
+        let percent = match total_secs {
+            Some(t) if t > 0.0 => ((secs / t) * 100.0).min(100.0),
+            _ => 0.0,
+        };
+        use tauri::Emitter;
+        let _ = app.emit(
+            "ffmpeg-progress",
+            FfmpegProgressPayload {
+                percent,
+                time_str: raw.to_string(),
+            },
+        );
+    }
+}
+
+// 带实时进度的 ffmpeg 转换命令（流式读取 stderr 解析 time=）
+#[tauri::command]
+async fn run_ffmpeg_with_progress(app: tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+
+    let input_path = args
+        .iter()
+        .position(|a| a == "-i")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .ok_or_else(|| "缺少输入文件参数(-i)".to_string())?;
+
+    // 探测输入时长（ffmpeg -i 会因缺少其他参数报错，但 stderr 包含 Duration）
+    let mut probe = Command::new("ffmpeg");
+    probe.args(["-i", &input_path]);
+    #[cfg(windows)]
+    probe.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let probe_output = probe.output().map_err(|e| format!("启动 ffmpeg 失败: {}", e))?;
+    let probe_stderr = String::from_utf8_lossy(&probe_output.stderr).to_string();
+    let total_secs = parse_ffmpeg_duration(&probe_stderr);
+
+    // 启动转换进程，管道捕获 stderr
+    let mut convert = Command::new("ffmpeg");
+    convert.args(&args).stdout(Stdio::null()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    convert.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let mut child = convert.spawn().map_err(|e| format!("启动 ffmpeg 失败: {}", e))?;
+
+    let stderr_pipe = child.stderr.take().ok_or("无法捕获 ffmpeg 输出")?;
+    let mut reader = std::io::BufReader::new(stderr_pipe);
+
+    let mut segment: Vec<u8> = Vec::new();
+    let mut err_tail: Vec<u8> = Vec::new(); // 保留末尾输出用于错误报告
+    let mut byte = [0u8; 1];
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) => {
+                if byte[0] == b'\r' || byte[0] == b'\n' {
+                    emit_ffmpeg_progress(&app, &segment, total_secs);
+                    segment.clear();
+                } else {
+                    segment.push(byte[0]);
+                }
+                err_tail.extend_from_slice(&byte);
+                if err_tail.len() > 4096 {
+                    let cut = err_tail.len() - 4096;
+                    err_tail.drain(..cut);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let status = child.wait().map_err(|e| format!("等待 ffmpeg 退出失败: {}", e))?;
+    if status.success() {
+        Ok("转换完成".to_string())
+    } else {
+        Err(format!(
+            "ffmpeg 退出码 {}: {}",
+            status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&err_tail)
+        ))
+    }
+}
+
+#[tauri::command]
 async fn read_file_as_base64(path: String) -> Result<String, String> {
     use std::fs;
     use base64::{Engine as _, engine::general_purpose};
@@ -290,7 +434,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, run_shell_command, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
+        .invoke_handler(tauri::generate_handler![greet, run_shell_command, get_file_size, move_file, remove_file, run_ffmpeg_with_progress, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

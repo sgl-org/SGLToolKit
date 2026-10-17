@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 import iconFont from './icons/font.png'
 import iconImage from './icons/image.png'
 import iconGif from './icons/gif.png'
+import iconVideo from './icons/video.png'
 import iconAbout from './icons/about.png'
 
 const router = useRouter()
@@ -17,6 +18,7 @@ const menus = ref([
   { path: '/font-convert', icon: iconFont, name: '字体转换' },
   { path: '/image-convert', icon: iconImage, name: '图片转换' },
   { path: '/gif-to-image', icon: iconGif, name: 'GIF转换' },
+  { path: '/video-convert', icon: iconVideo, name: '视频转换' },
   { path: '/about-info', icon: iconAbout, name: '关于' },
 ])
 
