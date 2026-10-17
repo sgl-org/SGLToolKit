@@ -422,7 +422,7 @@ async function convertGif() {
 
     for (let index = 0; index < sourceFrames.length; index++) {
       if (!gifFile.value) return;
-      const frameUrl = await renderConvertedFrame(sourceFrames[index].url, outputType, index);
+      const frameUrl = await renderConvertedFrame(sourceFrames[index].url, outputType);
       conversionResults.value.push({
         name: `${fileBaseName}_frame_${index + 1}.${outputType}`,
         url: frameUrl
@@ -439,7 +439,7 @@ async function convertGif() {
   }
 }
 
-async function renderConvertedFrame(sourceUrl, outputType, index) {
+async function renderConvertedFrame(sourceUrl, outputType) {
   const canvas = document.createElement('canvas');
   let image = null;
 
@@ -449,11 +449,6 @@ async function renderConvertedFrame(sourceUrl, outputType, index) {
     canvas.height = 200;
     const context = canvas.getContext('2d');
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    context.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    context.font = '16px Arial';
-    context.textAlign = 'center';
-    context.textBaseline = 'bottom';
-    context.fillText(`帧 ${index + 1}`, canvas.width / 2, canvas.height - 10);
     const blob = await canvasToBlob(canvas, getOutputMimeType(outputType));
     return URL.createObjectURL(blob);
   } finally {
