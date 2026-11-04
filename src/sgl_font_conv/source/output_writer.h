@@ -14,7 +14,6 @@ typedef struct {
     int                smart_mono;  /* enable smart monospace (group by script) */
     int                spacing;     /* extra pixel spacing between characters */
     int                flash;       /* external flash font: bitmap goes to bin_path */
-    int                flash_fixed; /* flash font with uniform (monospaced) glyphs */
     const char        *bin_path;   /* output path of the bitmap blob (.bin) */
 } writer_ctx_t;
 
