@@ -13,6 +13,7 @@ typedef struct {
     const char        *font_name;  /* variable name for sgl_font_t */
     int                smart_mono;  /* enable smart monospace (group by script) */
     int                spacing;     /* extra pixel spacing between characters */
+    int                fixed;       /* share one descriptor per monospaced block */
     int                flash;       /* external flash font: bitmap goes to bin_path */
     const char        *bin_path;   /* output path of the bitmap blob (.bin) */
 } writer_ctx_t;

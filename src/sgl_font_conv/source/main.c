@@ -39,6 +39,16 @@ static void print_usage(const char *prog)
         "  --compress            Enable RLE compression (bpp 2/4 only)\n"
         "  --smart-mono           Enable smart monospace (group by script)\n"
         "  --spacing <px>         Extra pixel spacing between characters (default 0)\n"
+        "  --fixed                Share one descriptor per monospaced block: a range whose\n"
+        "                        glyphs all have the same advance is emitted with a single\n"
+        "                        sgl_font_table_t entry (their bitmaps are padded into one\n"
+        "                        common cell), saving 12 bytes of table per character.\n"
+        "                        Typical for CJK / Japanese / Korean; needs no --compress.\n"
+        "                        Requires --flash: the saving lands in scarce internal flash\n"
+        "                        while the padding costs plentiful external flash, and only\n"
+        "                        that split is a win. Without --flash the option is ignored\n"
+        "                        and one table entry per character is emitted.\n"
+        "                        The target must be built with CONFIG_SGL_FLASH_FONT 1.\n"
         "  --flash               External flash font: bitmap is written to a .bin file\n"
         "                        (same name as --output, .bin extension) and the\n"
         "                        generated font uses SGL_FONT_FMT_EXT_FLASH\n"
@@ -199,6 +209,7 @@ int main(int argc, char *argv[])
     int compress_flag = 0;
     int smart_mono_flag = 0;
     int spacing_val = 0;
+    int fixed_flag = 0;
     int flash_flag = 0;
 
     font_entry_t *font_head = NULL;
@@ -240,6 +251,8 @@ int main(int argc, char *argv[])
             smart_mono_flag = 1;
         } else if (strcmp(argv[i], "--spacing") == 0 && i + 1 < argc) {
             spacing_val = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--fixed") == 0) {
+            fixed_flag = 1;
         } else if (strcmp(argv[i], "--flash") == 0) {
             flash_flag = 1;
         } else if (strcmp(argv[i], "--symbols") == 0 && i + 1 < argc) {
@@ -449,6 +462,7 @@ int main(int argc, char *argv[])
         .font_name = font_name,
         .smart_mono = smart_mono_flag,
         .spacing = spacing_val,
+        .fixed = fixed_flag,
         .flash = flash_flag,
         .bin_path = bin_path
     };

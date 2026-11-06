@@ -175,16 +175,257 @@ typedef struct {
     size_t   bitmap_offset;  /* offset into combined bitmap array */
 } compiled_glyph_t;
 
+/* ---------- monospaced (fixed width) blocks ---------- */
+
+/* A unicode block whose characters all share one descriptor, so that the font
+ * table does not need one entry per character (sgl_font_unicode_t.fixed).
+ * Square scripts (CJK / Japanese / Korean) and icon fonts are the typical case:
+ * their glyphs have the same advance and nearly the same box. */
+typedef struct {
+    int      used;          /* 1 when the block shares one descriptor */
+    int      padded;        /* 1 when glyph bitmaps had to be padded */
+    int     *gi;            /* glyph index of every position, in runtime order */
+    size_t   count;         /* number of characters of the block */
+    int      box_w, box_h;  /* shared cell */
+    int      adv_w;
+    int      ofs_x, ofs_y;
+    size_t   stride;        /* bytes of one slot in the bitmap blob */
+    size_t   base_offset;   /* bitmap offset of the first slot */
+    size_t   orig_bytes;    /* bytes of the same glyphs before the padding */
+    char     reason[96];    /* why the block keeps per-character entries */
+} block_fixed_t;
+
+/* A monospaced block is addressed by its position in font_unicode[], and the
+ * runtime keeps that number in the 7 bits above the index inside the block. */
+#define SGL_FONT_FIXED_MAX_BLOCKS 128
+
+/* Collect the glyph index of every position of a subtable, ordered the way the
+ * runtime numbers them (code - offset for the dense formats, position in the
+ * sparse list otherwise).
+ * Returns NULL when a position has no glyph: the linear addressing of a
+ * monospaced block cannot express the holes of a range with gaps. */
+static int *block_positions(const font_data_t *font, const cmap_subtable_t *st,
+                            size_t *out_count)
+{
+    size_t count, i;
+    int *gi;
+
+    if (st->format == CMAP_SPARSE_TINY) {
+        count = st->count;
+    } else {
+        count = (size_t)(st->max_code - st->min_code + 1);
+    }
+
+    gi = (int *)malloc(count * sizeof(int));
+    if (!gi) return NULL;
+
+    for (i = 0; i < count; i++) {
+        uint32_t code = (st->format == CMAP_SPARSE_TINY)
+                            ? st->codepoints[i]
+                            : (st->min_code + (uint32_t)i);
+        gi[i] = find_glyph_index(font, code);
+        if (gi[i] < 0) {
+            free(gi);
+            *out_count = 0;
+            return NULL;
+        }
+    }
+
+    *out_count = count;
+    return gi;
+}
+
+/* Grow one glyph bitmap into the shared cell: dx columns are inserted on the
+ * left and dy rows on top of the drawn box, so the ink keeps its absolute
+ * position. Note that ofs_y grows upwards (it is the bearing minus the height),
+ * hence dy is measured from the top of the block, not from its ofs_y. */
+static int glyph_pad(glyph_t *g, int cell_w, int cell_h, int dx, int dy,
+                     int cell_ofs_x, int cell_ofs_y, int *padded)
+{
+    uint8_t *dst;
+    int r;
+
+    if (g->box_w == cell_w && g->box_h == cell_h && dx == 0 && dy == 0 &&
+        g->ofs_x == cell_ofs_x && g->ofs_y == cell_ofs_y)
+        return 0;
+
+    dst = (uint8_t *)calloc((size_t)cell_w * (size_t)cell_h, 1);
+    if (!dst) return -1;
+
+    if (g->pixels != NULL) {
+        for (r = 0; r < g->box_h; r++) {
+            memcpy(dst + (size_t)(dy + r) * cell_w + dx,
+                   g->pixels + (size_t)r * g->box_w,
+                   (size_t)g->box_w);
+        }
+    }
+    free(g->pixels);
+
+    g->pixels = dst;
+    g->box_w = cell_w;
+    g->box_h = cell_h;
+    g->ofs_x = cell_ofs_x;
+    g->ofs_y = cell_ofs_y;
+    *padded = 1;
+    return 0;
+}
+
+/* Decide whether one subtable can share a single descriptor and, when the
+ * glyphs only differ in their box, pad them into one common cell so that they
+ * really do share it. The advance width is never touched: characters with
+ * different advances are proportional by nature and stay per-character. */
+static void block_try_fix(font_data_t *font, const cmap_subtable_t *st,
+                          int block_no, int bpp, block_fixed_t *bf)
+{
+    size_t i;
+    int cell_w, cell_h, min_ofs_x, max_right, min_ofs_y, max_top;
+
+    memset(bf, 0, sizeof(*bf));
+
+    if (block_no >= SGL_FONT_FIXED_MAX_BLOCKS) {
+        snprintf(bf->reason, sizeof(bf->reason),
+                 "more than %d unicode blocks", SGL_FONT_FIXED_MAX_BLOCKS);
+        return;
+    }
+
+    bf->gi = block_positions(font, st, &bf->count);
+    if (!bf->gi) {
+        snprintf(bf->reason, sizeof(bf->reason),
+                 "range has gaps (not rendered codepoints)");
+        return;
+    }
+    if (bf->count < 2) {
+        snprintf(bf->reason, sizeof(bf->reason), "block has a single glyph");
+        free(bf->gi);
+        bf->gi = NULL;
+        return;
+    }
+
+    /* bounding box of the ink of the whole block, empty glyphs aside */
+    bf->adv_w = font->glyphs[bf->gi[0]].adv_w;
+    min_ofs_x = 0;
+    max_right = 0;
+    min_ofs_y = 0;
+    max_top = 0;
+
+    for (i = 0; i < bf->count; i++) {
+        const glyph_t *g = &font->glyphs[bf->gi[i]];
+        if (g->adv_w != bf->adv_w) {
+            snprintf(bf->reason, sizeof(bf->reason),
+                     "advance widths differ (try --smart-mono)");
+            free(bf->gi);
+            bf->gi = NULL;
+            return;
+        }
+        if (g->box_w <= 0 || g->box_h <= 0) continue;
+        if (i == 0 || g->ofs_x < min_ofs_x) min_ofs_x = g->ofs_x;
+        if (i == 0 || g->ofs_x + g->box_w > max_right) max_right = g->ofs_x + g->box_w;
+        if (i == 0 || g->ofs_y < min_ofs_y) min_ofs_y = g->ofs_y;
+        if (i == 0 || g->ofs_y + g->box_h > max_top) max_top = g->ofs_y + g->box_h;
+    }
+
+    cell_w = max_right - min_ofs_x;
+    cell_h = max_top - min_ofs_y;
+    if (cell_w <= 0 || cell_h <= 0) {
+        snprintf(bf->reason, sizeof(bf->reason), "block has no ink");
+        free(bf->gi);
+        bf->gi = NULL;
+        return;
+    }
+
+    /* grow the glyphs that are smaller than the cell, or that do not start at
+     * the same place: the bitmap changes, the drawn result does not */
+    for (i = 0; i < bf->count; i++) {
+        glyph_t *g = &font->glyphs[bf->gi[i]];
+        int empty = (g->box_w <= 0 || g->box_h <= 0);
+        int dx = empty ? 0 : g->ofs_x - min_ofs_x;
+        int dy = empty ? 0 : max_top - (g->ofs_y + g->box_h);
+
+        bf->orig_bytes += ((size_t)g->box_w * (size_t)g->box_h * (size_t)bpp + 7) / 8;
+        if (glyph_pad(g, cell_w, cell_h, dx, dy, min_ofs_x, min_ofs_y,
+                      &bf->padded) != 0) {
+            snprintf(bf->reason, sizeof(bf->reason), "out of memory");
+            free(bf->gi);
+            bf->gi = NULL;
+            return;
+        }
+    }
+
+    bf->box_w = cell_w;
+    bf->box_h = cell_h;
+    bf->ofs_x = min_ofs_x;
+    bf->ofs_y = min_ofs_y;
+    bf->used = 1;
+}
+
+static void block_fixed_free(block_fixed_t *blocks, size_t count)
+{
+    size_t i;
+
+    if (!blocks) return;
+    for (i = 0; i < count; i++) {
+        free(blocks[i].gi);
+        blocks[i].gi = NULL;
+    }
+    free(blocks);
+}
+
 int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
 {
     const font_data_t *font = ctx->font;
     const cmap_plan_t *cmap = ctx->cmap;
     size_t glyph_count = font->glyph_count;
+    size_t st_idx;
     int flash = ctx->flash;
+    int use_fixed = 0;
+    compiled_glyph_t *compiled = NULL;
+    block_fixed_t *blocks = NULL;
 
-    /* ---- Phase 1: compile all glyph bitmaps ---- */
-    compiled_glyph_t *compiled = (compiled_glyph_t *)calloc(glyph_count, sizeof(compiled_glyph_t));
-    if (!compiled) return -1;
+    /* ---- Phase 1: metrics only passes ---- */
+
+    /* smart monospace */
+    if (ctx->smart_mono) {
+        apply_smart_mono((font_data_t *)font);  /* cast away const, safe here */
+    }
+
+    /* character spacing */
+    if (ctx->spacing > 0) {
+        for (size_t i = 0; i < glyph_count; i++) {
+            ((font_data_t *)font)->glyphs[i].adv_w += ctx->spacing * 16;
+        }
+    }
+
+    /* monospaced blocks: may pad glyph bitmaps into one shared cell, so this
+     * has to happen before the bitmaps get compiled */
+    blocks = (block_fixed_t *)calloc(cmap->count, sizeof(block_fixed_t));
+    if (!blocks) return -1;
+
+    /* The shared descriptor is only worth having for an external flash font:
+     * it removes font table entries from the scarce internal flash and the
+     * price is padding inside the bitmap blob, which lives in cheap external
+     * flash. A RAM font would pay the padding in internal flash as well and
+     * keep the table it did not save, so --fixed is ignored there. */
+    if (ctx->fixed && !ctx->flash) {
+        fprintf(stderr,
+                "Note: --fixed ignored without --flash, a RAM font pays the padding and\n"
+                "      keeps the table, so one font table entry per character is emitted\n");
+    } else if (ctx->fixed && should_compress(ctx->bpp, ctx->compress)) {
+        fprintf(stderr,
+                "Note: --fixed ignored, RLE compressed bitmaps have no uniform stride\n");
+    } else if (ctx->fixed) {
+        use_fixed = 1;
+        for (st_idx = 0; st_idx < cmap->count; st_idx++) {
+            block_try_fix((font_data_t *)font, &cmap->subtables[st_idx],
+                          (int)st_idx, ctx->bpp, &blocks[st_idx]);
+        }
+    }
+
+    /* ---- Phase 2: compile all glyph bitmaps ---- */
+    compiled = (compiled_glyph_t *)calloc(glyph_count, sizeof(compiled_glyph_t));
+    if (!compiled) {
+        block_fixed_free(blocks, cmap->count);
+        return -1;
+    }
 
     size_t total_bitmap_size = 0;
     for (size_t i = 0; i < glyph_count; i++) {
@@ -194,7 +435,52 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
         total_bitmap_size += compiled[i].bitmap_len;
     }
 
-    /* ---- Phase 1.2: external flash fonts write the bitmap blob to a .bin file ---- */
+    /* ---- Phase 2.5: confirm a block can really be addressed linearly ---- */
+    for (st_idx = 0; st_idx < cmap->count; st_idx++) {
+        block_fixed_t *bf = &blocks[st_idx];
+        size_t k;
+
+        if (!bf->used) continue;
+
+        bf->stride = ((size_t)bf->box_w * (size_t)bf->box_h * (size_t)ctx->bpp + 7) / 8;
+        bf->base_offset = compiled[bf->gi[0]].bitmap_offset;
+
+        for (k = 0; k < bf->count; k++) {
+            const compiled_glyph_t *cg = &compiled[bf->gi[k]];
+            if (cg->bitmap_len != bf->stride ||
+                cg->bitmap_offset != bf->base_offset + k * bf->stride) {
+                snprintf(bf->reason, sizeof(bf->reason),
+                         "bitmaps are not stored back to back");
+                bf->used = 0;
+                break;
+            }
+        }
+    }
+
+    if (use_fixed) {
+        for (st_idx = 0; st_idx < cmap->count; st_idx++) {
+            const block_fixed_t *bf = &blocks[st_idx];
+            long delta;
+
+            if (bf->used) {
+                /* what the shared cell costs in the blob, against the font
+                 * table entries it removes */
+                delta = (long)(bf->count * bf->stride) - (long)bf->orig_bytes;
+                printf("  [%u] fixed block: %u glyph(s), cell %dx%d, stride %u B, "
+                       "%u table entr%s replaced by 1 descriptor, "
+                       "bitmap %+ld B%s\n",
+                       (unsigned)st_idx, (unsigned)bf->count, bf->box_w, bf->box_h,
+                       (unsigned)bf->stride, (unsigned)bf->count,
+                       bf->count == 1 ? "y" : "ies", delta,
+                       bf->padded ? " (bitmaps padded to the cell)" : "");
+            } else {
+                printf("  [%u] per-glyph table: %s\n", (unsigned)st_idx,
+                       bf->reason[0] ? bf->reason : "--fixed not applicable");
+            }
+        }
+    }
+
+    /* ---- Phase 3: external flash fonts write the bitmap blob to a .bin file ---- */
     if (flash) {
         if (!ctx->bin_path) {
             fprintf(stderr, "Error: flash font requires a bin output path\n");
@@ -219,19 +505,7 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
                ctx->bin_path, (unsigned)glyph_count);
     }
 
-    /* ---- Phase 1.5: smart monospace ---- */
-    if (ctx->smart_mono) {
-        apply_smart_mono((font_data_t *)font);  /* cast away const, safe here */
-    }
-
-    /* ---- Phase 1.6: apply character spacing ---- */
-    if (ctx->spacing > 0) {
-        for (size_t i = 0; i < glyph_count; i++) {
-            ((font_data_t *)font)->glyphs[i].adv_w += ctx->spacing * 16;
-        }
-    }
-
-    /* ---- Phase 2: write C file header ---- */
+    /* ---- Phase 4: write C file header ---- */
     fprintf(fp, "/* source/fonts/%s.c\n", ctx->font_name);
     fprintf(fp, " *\n");
     fprintf(fp, " * MIT License\n");
@@ -284,7 +558,50 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, "#endif\n\n");
     fprintf(fp, "#if %s\n\n", macro_name);
 
-    /* ---- Phase 3: write font_bitmap[] (skipped for external flash fonts,
+    /* ---- Phase 4.5: spell out the requirements the target build has to meet,
+     * so that a misconfigured project fails to compile rather than render
+     * garbage. ---- */
+    {
+        size_t bs;
+        int fixed_used = 0;
+
+        for (bs = 0; bs < cmap->count; bs++) {
+            if (blocks[bs].used) {
+                fixed_used = 1;
+                break;
+            }
+        }
+
+        /* Monospaced blocks are only decoded when the library is built with
+         * external flash font support, because that is the only layout where
+         * trading table for bitmap pays off. Without it the lookup branches of
+         * sgl_core.c are compiled out, so such a font could only be misread. */
+        if (fixed_used) {
+            fprintf(fp, "#if (!CONFIG_SGL_FLASH_FONT)\n");
+            fprintf(fp, "#error \"%s uses monospaced blocks (--fixed), which "
+                        "requires CONFIG_SGL_FLASH_FONT 1\"\n", ctx->font_name);
+            fprintf(fp, "#endif\n\n");
+        }
+
+        /* The bitmap blob of a big font does not fit into the 16 bit
+         * bitmap_index of the small font table anymore. The compiler only
+         * truncates the initializers, and a wrapped offset silently draws another
+         * character, so make the requirement visible at build time instead. */
+        if (total_bitmap_size > 65535) {
+            fprintf(fp, "/* The bitmap blob is %u bytes, more than the 64 KB a 16 bit\n"
+                        " * bitmap_index can address: this project must be built with\n"
+                        " * CONFIG_SGL_FONT_SMALL_TABLE set to 0. */\n"
+                        "typedef char %s_bitmap_index_needs_32_bit_table[\n"
+                        "        sizeof(((sgl_font_table_t *)0)->bitmap_index) >= 4 ? 1 : -1];\n\n",
+                    (unsigned)total_bitmap_size, ctx->font_name);
+            fprintf(stderr,
+                    "Warning: bitmap blob is %u bytes (> 64 KB), build the target "
+                    "with CONFIG_SGL_FONT_SMALL_TABLE 0\n",
+                    (unsigned)total_bitmap_size);
+        }
+    }
+
+    /* ---- Phase 5: write font_bitmap[] (skipped for external flash fonts,
      * the bitmap blob lives in the .bin file instead) ---- */
     if (!flash) {
     fprintf(fp, "static const uint8_t font_bitmap[] = {\n");
@@ -320,16 +637,28 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, "};\n\n");
     }
 
-    /* ---- Phase 4: write font_table[] ---- */
+    /* ---- Phase 6: write font_table[] ---- */
     {
     /* font_table entries must follow cmap subtable order, with dummy entries
      * for gaps in FORMAT0 subtables. This ensures tab_offset + (code - offset)
-     * correctly indexes into font_table at runtime. */
+     * correctly indexes into font_table at runtime. Monospaced blocks contribute
+     * no entry at all, they are described by one shared descriptor. */
     fprintf(fp, "\nstatic const sgl_font_table_t font_table[] = {\n");
     fprintf(fp, "    {.bitmap_index = 0, .adv_w = 0, .box_w = 0, .box_h = 0, .ofs_x = 0, .ofs_y = 0} /* id = 0 reserved */");
 
-    for (size_t st_idx = 0; st_idx < cmap->count; st_idx++) {
+    for (st_idx = 0; st_idx < cmap->count; st_idx++) {
         const cmap_subtable_t *st = &cmap->subtables[st_idx];
+        const block_fixed_t *bf = &blocks[st_idx];
+        size_t k;
+
+        if (bf->used) {
+            /* No entry is emitted for this block, so it must not touch the
+             * comma either: a comment is not an initializer element, and two
+             * adjacent monospaced blocks would leave a stray comma behind. */
+            fprintf(fp, "\n    /* U+%04X..U+%04X: monospaced block, shared descriptor */",
+                    st->min_code, st->max_code);
+            continue;
+        }
 
         if (st->format == CMAP_FORMAT0 || st->format == CMAP_FORMAT0_TINY) {
             /* FORMAT0: iterate all positions in range, dummy entries for gaps */
@@ -348,7 +677,7 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
             }
         } else {
             /* SPARSE_TINY: only actual codepoints, no gaps */
-            for (size_t k = 0; k < st->count; k++) {
+            for (k = 0; k < st->count; k++) {
                 uint32_t code = st->codepoints[k];
                 int gi = find_glyph_index(font, code);
                 if (gi >= 0) {
@@ -368,11 +697,11 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     fprintf(fp, "\n};\n\n");
     } /* end font_table */
 
-    /* ---- Phase 5: write unicode_list arrays and font_unicode[] ---- */
+    /* ---- Phase 7: write unicode_list arrays, shared descriptors and font_unicode[] ---- */
 
     {
     /* Write unicode_list_N arrays for sparse subtables */
-    for (size_t st_idx = 0; st_idx < cmap->count; st_idx++) {
+    for (st_idx = 0; st_idx < cmap->count; st_idx++) {
         const cmap_subtable_t *st = &cmap->subtables[st_idx];
 
         if (st->format == CMAP_SPARSE_TINY) {
@@ -391,16 +720,34 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
         }
     }
 
+    /* One shared descriptor per monospaced block, referenced by font_unicode[]
+     * below. bitmap_index is the offset of the first glyph of the block; the
+     * runtime adds index_in_block x (box_w * box_h * bpp / 8) to it. */
+    for (st_idx = 0; st_idx < cmap->count; st_idx++) {
+        const block_fixed_t *bf = &blocks[st_idx];
+
+        if (!bf->used) continue;
+        fprintf(fp, "static const sgl_font_table_t %s_fixed_%u = {\n",
+                ctx->font_name, (unsigned)st_idx);
+        fprintf(fp, "    .bitmap_index = %u, .adv_w = %d,\n",
+                (unsigned)bf->base_offset, bf->adv_w);
+        fprintf(fp, "    .box_w = %d, .box_h = %d, .ofs_x = %d, .ofs_y = %d\n",
+                bf->box_w, bf->box_h, bf->ofs_x, bf->ofs_y);
+        fprintf(fp, "};\n\n");
+    }
+
     /* Write font_unicode[] */
     fprintf(fp, "static const sgl_font_unicode_t font_unicode[] = {\n");
 
-    /* tab_offset is cumulative: 1 (reserved entry) + sum of previous subtable len values.
-     * This must match the font_table[] layout where each subtable contributes
-     * exactly 'len' entries (with dummy entries for FORMAT0 gaps). */
+    /* tab_offset is cumulative: 1 (reserved entry) + sum of the font_table
+     * entries emitted so far. Monospaced blocks emit none, so they do not move
+     * it. This must match the font_table[] layout. */
     int cumulative_offset = 1;
 
-    for (size_t st_idx = 0; st_idx < cmap->count; st_idx++) {
+    for (st_idx = 0; st_idx < cmap->count; st_idx++) {
         const cmap_subtable_t *st = &cmap->subtables[st_idx];
+        const block_fixed_t *bf = &blocks[st_idx];
+        size_t emitted = 0;
 
         /* Determine len field */
         size_t len;
@@ -420,22 +767,33 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
             list_name = "NULL";
         }
 
-        /* tab_offset = cumulative offset (1-based, entry 0 is reserved) */
-        int tab_offset = cumulative_offset;
+        /* tab_offset = cumulative offset (1-based, entry 0 is reserved), unused
+         * for a monospaced block, which points at its shared descriptor */
+        int tab_offset = bf->used ? 0 : cumulative_offset;
+        char fixed_buf[64];
+        if (bf->used) {
+            snprintf(fixed_buf, sizeof(fixed_buf), "&%s_fixed_%u",
+                     ctx->font_name, (unsigned)st_idx);
+        } else {
+            snprintf(fixed_buf, sizeof(fixed_buf), "NULL");
+        }
 
-        fprintf(fp, "    { .offset = 0x%x, .len = %u, .list = %s, .tab_offset = %d, }",
-                st->min_code, (unsigned)len, list_name, tab_offset);
+        fprintf(fp, "    { .offset = 0x%x, .len = %u, .list = %s, .tab_offset = %d, .fixed = %s, }",
+                st->min_code, (unsigned)len, list_name, tab_offset, fixed_buf);
 
         if (st_idx < cmap->count - 1) fprintf(fp, ",");
         fprintf(fp, "\n");
 
-        cumulative_offset += (int)len;
+        if (!bf->used) {
+            emitted = len;
+            cumulative_offset += (int)emitted;
+        }
     }
 
     fprintf(fp, "};\n\n");
     } /* end font_unicode */
 
-    /* ---- Phase 6: write sgl_font_t ---- */
+    /* ---- Phase 8: write sgl_font_t ---- */
     if (flash) {
         fprintf(fp, "extern int32_t %s_flash_read(uint32_t addr, void *buf, uint32_t len);\n\n",
                 ctx->font_name);
@@ -476,7 +834,7 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
         free(compiled[i].bitmap_data);
     }
     free(compiled);
-
+    block_fixed_free(blocks, cmap->count);
     return 0;
 
 fail:
@@ -484,5 +842,6 @@ fail:
         free(compiled[i].bitmap_data);
     }
     free(compiled);
+    block_fixed_free(blocks, cmap->count);
     return -1;
 }

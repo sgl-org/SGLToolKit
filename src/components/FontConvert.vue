@@ -52,8 +52,8 @@
           </div>
           <div class="setting-item">
             <label class="setting-label">启用压缩</label>
-            <div class="setting-checkbox-box">
-              <input v-model="compress" type="checkbox" />
+            <div class="setting-checkbox-box" :class="{ disabled: flashFont }">
+              <input v-model="compress" type="checkbox" :disabled="flashFont" />
               <span>压缩</span>
             </div>
           </div>
@@ -308,6 +308,13 @@ function autoGenerateFontName() {
 watch(fontSize, () => {
   if (fontFilePath.value) {
     autoGenerateFontName();
+  }
+});
+
+/* 外部Flash字体与RLE压缩互斥（压缩位图无统一stride，--fixed会失效），勾选后自动取消压缩 */
+watch(flashFont, (checked) => {
+  if (checked) {
+    compress.value = false;
   }
 });
 
@@ -605,7 +612,8 @@ async function convertFont() {
     }
 
     if (flashFont.value) {
-      args.push('--flash');
+      // 外部Flash字体自动启用等宽块共享描述符，节省内部Flash字体表
+      args.push('--flash', '--fixed');
     }
 
     if (charSpacing.value > 0) {
