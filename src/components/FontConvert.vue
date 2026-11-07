@@ -336,7 +336,11 @@ const charRanges = ref([{ start: 0x20, end: 0x7F }]);
  * GBK/Shift_JIS 的码位在 Unicode 中并非连续区间，这里用常用大区近似覆盖：
  *   GBK 汉字 → CJK 统一表意文字 0x4E00-0x9FFF；
  *   Shift_JIS → 标点与假名 0x3000-0x30FF、汉字 0x4E00-0x9FFF、
- *               全角英数/半角片假名 0xFF00-0xFFEF。
+ *               全角英数/半角片假名 0xFF00-0xFFEF；
+ *   Hangul（EUC-KR/KS X 1001）→ 兼容字母 0x3130-0x318F、
+ *               现代韩文音节 0xAC00-0xD7A3、CJK 标点 0x3000-0x303F。
+ * Emoticons 0x1F600-0x1F64F 在 BMP 之外，工具与 SGL 的 offset/len 均为 uint32_t，
+ * 可直接按单段范围取模；需选含 emoji 字形的字体（如 Segoe UI Emoji）。
  * 转换工具按 --range 逐个码点取模，段与段之间互不影响。 */
 const rangePresets = [
   { value: 'custom', label: '自定义范围' },
@@ -352,6 +356,24 @@ const rangePresets = [
       { start: 0x4E00, end: 0x9FFF, label: '日文Shift_JIS·汉字' },
       { start: 0xFF00, end: 0xFFEF, label: '日文Shift_JIS·全角' },
     ],
+  },
+  {
+    value: 'hangul',
+    label: '韩文Hangul (3 段)',
+    tag: '韩文Hangul',
+    hint: '将一次添加 3 段范围：0x3130-0x318F（兼容韩文字母）、0xAC00-0xD7A3（韩文音节，覆盖 EUC-KR/KS X 1001 全部音节）、0x3000-0x303F（CJK 标点），每段可单独删除',
+    segments: [
+      { start: 0x3130, end: 0x318F, label: '韩文Hangul·字母' },
+      { start: 0xAC00, end: 0xD7A3, label: '韩文Hangul·音节' },
+      { start: 0x3000, end: 0x303F, label: '韩文Hangul·标点' },
+    ],
+  },
+  {
+    value: 'emoticons',
+    label: 'Emoticons (0x1F600-0x1F64F)',
+    tag: 'Emoticons',
+    start: 0x1F600,
+    end: 0x1F64F,
   },
 ];
 const rangePreset = ref('custom');
