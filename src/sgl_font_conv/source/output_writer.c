@@ -588,7 +588,7 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
          * truncates the initializers, and a wrapped offset silently draws another
          * character, so make the requirement visible at build time instead. */
         if (total_bitmap_size > 65535) {
-            fprintf(fp, "#if (!CONFIG_SGL_FONT_SMALL_TABLE)\n");
+            fprintf(fp, "#if (CONFIG_SGL_FONT_SMALL_TABLE)\n");
             fprintf(fp, "#error \"%s bitmap > 64 KB, which requires CONFIG_SGL_FONT_SMALL_TABLE 0\"\n", ctx->font_name);
             fprintf(fp, "#endif\n\n");
         }
