@@ -424,7 +424,7 @@ int main(int argc, char *argv[])
     }
     cmap_plan_t cmap = cmap_build(rendered_codes, merged_font.glyph_count);
     free(rendered_codes);
-    printf("  %u subtable(s)\n", (unsigned)cmap.count);
+    printf("  %u subtable(s) (continuous dense ranges merged)\n", (unsigned)cmap.count);
 
     for (size_t i = 0; i < cmap.count; i++) {
         const cmap_subtable_t *st = &cmap.subtables[i];

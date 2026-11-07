@@ -141,11 +141,24 @@
           <div class="range-section">
             <label class="form-label">字符范围</label>
             <div class="range-inputs">
+              <select
+                v-model="rangePreset"
+                class="form-select range-preset-select"
+                title="选择常用字符集预设：单段预设自动填入范围（可手动修改），多段预设一次添加多段可单独删除的范围"
+              >
+                <option
+                  v-for="preset in rangePresets"
+                  :key="preset.value"
+                  :value="preset.value"
+                >{{ preset.label }}</option>
+              </select>
               <input
                 v-model="charRangeStart"
                 type="text"
                 placeholder="0x20"
                 class="form-input small"
+                :readonly="isMultiSegmentPreset"
+                :title="isMultiSegmentPreset ? '多段预设不使用手动范围，点添加即可' : '起始码点'"
               />
               <span>-</span>
               <input
@@ -153,8 +166,13 @@
                 type="text"
                 placeholder="0x7F"
                 class="form-input small"
+                :readonly="isMultiSegmentPreset"
+                :title="isMultiSegmentPreset ? '多段预设不使用手动范围，点添加即可' : '结束码点'"
               />
               <button class="add-range-btn" @click="addCharRange">添加</button>
+            </div>
+            <div v-if="isMultiSegmentPreset" class="range-preset-hint">
+              {{ activeRangePreset.hint }}
             </div>
             <div class="range-tags">
               <span
@@ -162,6 +180,7 @@
                 :key="index"
                 class="range-tag"
               >
+                <span v-if="range.label" class="range-tag-label">{{ range.label }}</span>
                 {{ formatRange(range) }}
                 <span class="remove-tag" @click="removeCharRange(index)">×</span>
               </span>
@@ -311,6 +330,45 @@ const charRangeStart = ref('0x20');
 const infoMessages = ref([]);
 const charRangeEnd = ref('0x7F');
 const charRanges = ref([{ start: 0x20, end: 0x7F }]);
+
+/* 「字符范围」常用预设：单段预设选中后自动填入起止码点，仍可手动微调再点添加；
+ * 多段预设（segments）一次添加若干条独立、可分别删除的范围。
+ * GBK/Shift_JIS 的码位在 Unicode 中并非连续区间，这里用常用大区近似覆盖：
+ *   GBK 汉字 → CJK 统一表意文字 0x4E00-0x9FFF；
+ *   Shift_JIS → 标点与假名 0x3000-0x30FF、汉字 0x4E00-0x9FFF、
+ *               全角英数/半角片假名 0xFF00-0xFFEF。
+ * 转换工具按 --range 逐个码点取模，段与段之间互不影响。 */
+const rangePresets = [
+  { value: 'custom', label: '自定义范围' },
+  { value: 'ascii', label: 'ASCII (0x20-0x7F)', tag: 'ASCII', start: 0x20, end: 0x7F },
+  { value: 'gbk', label: '中文GBK (0x4E00-0x9FFF)', tag: '中文GBK', start: 0x4E00, end: 0x9FFF },
+  {
+    value: 'shiftjis',
+    label: '日文Shift_JIS (3 段)',
+    tag: '日文Shift_JIS',
+    hint: '将一次添加 3 段范围：0x3000-0x30FF（标点/平假名/片假名）、0x4E00-0x9FFF（汉字）、0xFF00-0xFFEF（全角英数与半角片假名），每段可单独删除',
+    segments: [
+      { start: 0x3000, end: 0x30FF, label: '日文Shift_JIS·假名' },
+      { start: 0x4E00, end: 0x9FFF, label: '日文Shift_JIS·汉字' },
+      { start: 0xFF00, end: 0xFFEF, label: '日文Shift_JIS·全角' },
+    ],
+  },
+];
+const rangePreset = ref('custom');
+const activeRangePreset = computed(() => rangePresets.find(p => p.value === rangePreset.value));
+const isMultiSegmentPreset = computed(() => !!activeRangePreset.value?.segments);
+
+watch(rangePreset, (value) => {
+  const preset = rangePresets.find(p => p.value === value);
+  if (preset && preset.start !== undefined) {
+    charRangeStart.value = `0x${preset.start.toString(16).toUpperCase()}`;
+    charRangeEnd.value = `0x${preset.end.toString(16).toUpperCase()}`;
+  } else if (preset && preset.segments) {
+    // 多段预设不占用手动输入框
+    charRangeStart.value = '';
+    charRangeEnd.value = '';
+  }
+});
 const customChars = ref('');
 const outputDirName = ref('');
 const outputDirPath = ref(localStorage.getItem('lastOutputDirPath') || '');
@@ -702,6 +760,20 @@ function formatRange(range) {
 }
 
 function addCharRange() {
+  const preset = rangePresets.find(p => p.value === rangePreset.value);
+
+  // 多段字符集：一次加入多条独立范围，每条都能用 × 单独删除
+  if (preset && preset.segments) {
+    for (const seg of preset.segments) {
+      charRanges.value.push({ start: seg.start, end: seg.end, label: seg.label });
+    }
+    addInfoMessage(`已添加${preset.tag}：${preset.segments.length} 段范围，可逐段删除`, 'info');
+    charRangeStart.value = '';
+    charRangeEnd.value = '';
+    rangePreset.value = 'custom';
+    return;
+  }
+
   const start = parseHexValue(charRangeStart.value);
   const end = parseHexValue(charRangeEnd.value);
 
@@ -715,9 +787,14 @@ function addCharRange() {
     return;
   }
 
-  charRanges.value.push({ start, end });
+  // 只有范围与预设完全一致时才标注名称，避免手动微调后标签名不副实
+  const label = preset && preset.tag && start === preset.start && end === preset.end
+    ? preset.tag
+    : '';
+  charRanges.value.push(label ? { start, end, label } : { start, end });
   charRangeStart.value = '';
   charRangeEnd.value = '';
+  rangePreset.value = 'custom';
 }
 
 function removeCharRange(index) {
@@ -1264,12 +1341,39 @@ h2 {
 .range-inputs {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
 }
 
 .range-inputs span {
   color: #666;
+}
+
+/* 预设下拉：覆盖 .form-select 的 width:100%，不挤压两个码点输入框 */
+.range-preset-select {
+  width: auto;
+  min-width: 200px;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+}
+
+.range-inputs .form-input[readonly] {
+  background: #f2f2f2;
+  color: #999;
+}
+
+.range-preset-hint {
+  margin: -4px 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #888;
+}
+
+.range-tag-label {
+  margin-right: 6px;
+  font-family: inherit;
+  font-weight: 600;
 }
 
 .add-range-btn {
@@ -1753,6 +1857,24 @@ html.dark .form-input:focus,
 html.dark .form-select:focus {
   border-color: #6699ff;
   background: #2f354a;
+}
+
+html.dark .range-inputs span {
+  color: #a0a6b8;
+}
+
+html.dark .range-tag {
+  background: #2a3550;
+  color: #8fb4ff;
+}
+
+html.dark .range-inputs .form-input[readonly] {
+  background: #20243a;
+  color: #7a8199;
+}
+
+html.dark .range-preset-hint {
+  color: #8a90a5;
 }
 
 html.dark .file-input-wrapper {

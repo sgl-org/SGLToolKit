@@ -418,6 +418,23 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
             block_try_fix((font_data_t *)font, &cmap->subtables[st_idx],
                           (int)st_idx, ctx->bpp, &blocks[st_idx]);
         }
+
+        /* A dense run only shares one descriptor when every glyph has the same
+         * advance. With mixed advances the generator falls back to one
+         * font_table entry per character, which can be very large; warn the
+         * user so they can pick a monospaced font or narrow the range. */
+        for (st_idx = 0; st_idx < cmap->count; st_idx++) {
+            const cmap_subtable_t *st = &cmap->subtables[st_idx];
+            const block_fixed_t *bf = &blocks[st_idx];
+
+            if (!bf->used && bf->count > 256) {
+                fprintf(stderr,
+                        "Warning: U+%04X..U+%04X (%u glyphs) cannot share one descriptor (%s);\n"
+                        "         every glyph now needs a font_table entry; consider a monospaced\n"
+                        "         font or splitting the range into smaller pieces.\n",
+                        st->min_code, st->max_code, (unsigned)bf->count, bf->reason);
+            }
+        }
     }
 
     /* ---- Phase 2: compile all glyph bitmaps ---- */

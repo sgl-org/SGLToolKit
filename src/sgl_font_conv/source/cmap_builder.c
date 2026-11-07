@@ -10,6 +10,11 @@
 
 #define SUBTABLE_ENTRY_OVERHEAD 16
 
+/* A dense (list == NULL) unicode block is bounded only by uint32_t len in SGL,
+ * but sgl_font_t.font_table_size is uint16_t and the fixed-block glyph index
+ * uses 24 local bits. Keep merged blocks comfortably below both limits. */
+#define SGL_CMAP_MAX_DENSE_LEN 65535u
+
 typedef struct {
     long long dist;
     size_t    start;
@@ -44,6 +49,64 @@ static long long subtable_cost(const cmap_subtable_t *st)
         return est_sparse_tiny(st->count);
     }
     return 0;
+}
+
+/* Join adjacent dense subtables that together form one gap-free run of
+ * codepoints. The DP inherited from lv_font_conv caps format0_tiny at 256
+ * codepoints, which splits a continuous CJK range into dozens of identical
+ * .len = 256 entries. SGL has no such cap, and a dense block needs no
+ * unicode_list at all, so keeping them separate only costs font_unicode[]
+ * entries, shared descriptors and linear lookup time.
+ *
+ * Only format0_tiny (consecutive, no gaps) blocks are merged: a merged block
+ * with holes would need dummy font_table entries and could no longer be
+ * described by one shared fixed descriptor. */
+static void merge_dense_runs(cmap_subtable_t **subs_ptr, size_t *count_ptr)
+{
+    cmap_subtable_t *subs = *subs_ptr;
+    size_t n = *count_ptr;
+    cmap_subtable_t *out;
+    size_t w = 0, r;
+
+    if (n < 2) return;
+    out = (cmap_subtable_t *)calloc(n, sizeof(cmap_subtable_t));
+    if (!out) return;  /* out of memory: keep the original plan */
+
+    for (r = 0; r < n; ) {
+        cmap_subtable_t cur = subs[r];
+        size_t k = r + 1;
+
+        while (k < n &&
+               cur.format == CMAP_FORMAT0_TINY &&
+               subs[k].format == CMAP_FORMAT0_TINY &&
+               cur.max_code < UINT32_MAX &&
+               cur.max_code + 1u == subs[k].min_code &&
+               (uint64_t)subs[k].max_code - cur.min_code + 1u <= SGL_CMAP_MAX_DENSE_LEN) {
+            size_t total = cur.count + subs[k].count;
+            uint32_t *merged = (uint32_t *)malloc(total * sizeof(uint32_t));
+            if (!merged) break;
+
+            memcpy(merged, cur.codepoints, cur.count * sizeof(uint32_t));
+            memcpy(merged + cur.count, subs[k].codepoints,
+                   subs[k].count * sizeof(uint32_t));
+
+            free(cur.codepoints);
+            free(subs[k].codepoints);
+            subs[k].codepoints = NULL;
+
+            cur.codepoints = merged;
+            cur.count = total;
+            cur.max_code = subs[k].max_code;
+            k++;
+        }
+
+        out[w++] = cur;   /* the merged block keeps format0_tiny */
+        r = k;            /* consumed subtables are intentionally dropped */
+    }
+
+    free(subs);
+    *subs_ptr = out;
+    *count_ptr = w;
 }
 
 cmap_plan_t cmap_build(const uint32_t *codes, size_t count)
@@ -133,6 +196,11 @@ cmap_plan_t cmap_build(const uint32_t *codes, size_t count)
         result[i] = result[result_count - 1 - i];
         result[result_count - 1 - i] = tmp;
     }
+
+    /* Join gap-free dense runs into one unicode block. This must run before the
+     * post-merge pass below, otherwise small adjacent runs can be turned into
+     * sparse_tiny first and become unmergeable. */
+    merge_dense_runs(&result, &result_count);
 
     /* Post-merge: merge adjacent subtables when combining into sparse_tiny
      * is cheaper (accounting for per-subtable entry overhead). */
