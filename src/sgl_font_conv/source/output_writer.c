@@ -588,16 +588,9 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
          * truncates the initializers, and a wrapped offset silently draws another
          * character, so make the requirement visible at build time instead. */
         if (total_bitmap_size > 65535) {
-            fprintf(fp, "/* The bitmap blob is %u bytes, more than the 64 KB a 16 bit\n"
-                        " * bitmap_index can address: this project must be built with\n"
-                        " * CONFIG_SGL_FONT_SMALL_TABLE set to 0. */\n"
-                        "typedef char %s_bitmap_index_needs_32_bit_table[\n"
-                        "        sizeof(((sgl_font_table_t *)0)->bitmap_index) >= 4 ? 1 : -1];\n\n",
-                    (unsigned)total_bitmap_size, ctx->font_name);
-            fprintf(stderr,
-                    "Warning: bitmap blob is %u bytes (> 64 KB), build the target "
-                    "with CONFIG_SGL_FONT_SMALL_TABLE 0\n",
-                    (unsigned)total_bitmap_size);
+            fprintf(fp, "#if (!CONFIG_SGL_FONT_SMALL_TABLE)\n");
+            fprintf(fp, "#error \"%s bitmap > 64 KB, which requires CONFIG_SGL_FONT_SMALL_TABLE 0\"\n", ctx->font_name);
+            fprintf(fp, "#endif\n\n");
         }
     }
 
@@ -820,8 +813,8 @@ int write_sgl_font(FILE *fp, const writer_ctx_t *ctx)
     if (flash) {
         fprintf(fp, "#if (CONFIG_SGL_FLASH_FONT)\n");
         fprintf(fp, "    .flash_read = %s_flash_read,\n", ctx->font_name);
-        fprintf(fp, "    .flash_addr = 0, /* offset of the %s blob in external flash */\n",
-                ctx->font_name);
+        fprintf(fp, "    .flash_addr = 0x%08X, /* offset of the %s blob in external flash */\n",
+                (unsigned)ctx->flash_addr, ctx->font_name);
         fprintf(fp, "#endif\n");
     }
     fprintf(fp, "};\n");

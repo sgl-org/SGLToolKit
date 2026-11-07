@@ -12,6 +12,45 @@
             readonly
           />
           <button class="file-select-btn" @click="selectFontFile">浏览</button>
+          <div class="system-font-picker" ref="fontPickerRef">
+            <button
+              class="system-font-btn"
+              type="button"
+              :disabled="fontsLoading"
+              :title="fontsLoading ? '正在读取系统字体库...' : '从 Windows 字体库中选择已安装的字体'"
+              @click="toggleFontPicker"
+            >
+              {{ fontsLoading ? '加载中...' : '系统字体 (' + systemFonts.length + ')' }}
+              <span class="picker-arrow" :class="{ open: fontPickerOpen }">▾</span>
+            </button>
+            <div v-if="fontPickerOpen" class="system-font-dropdown">
+              <input
+                ref="fontSearchRef"
+                v-model="fontSearch"
+                type="text"
+                class="form-input font-search-input"
+                placeholder="搜索字体名称 / 文件名"
+                @keydown.esc="fontPickerOpen = false"
+              />
+              <div class="font-list">
+                <button
+                  v-for="font in filteredSystemFonts"
+                  :key="font.path"
+                  type="button"
+                  class="font-list-item"
+                  :class="{ active: font.path === fontFilePath }"
+                  :title="font.path"
+                  @click="chooseSystemFont(font)"
+                >
+                  <span class="font-item-name">{{ font.name }}</span>
+                  <span class="font-item-file">{{ font.file }}</span>
+                </button>
+                <div v-if="filteredSystemFonts.length === 0" class="font-list-empty">
+                  {{ systemFonts.length === 0 ? '未找到系统字体' : '没有匹配的字体' }}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -64,11 +103,24 @@
               <span>等宽</span>
             </div>
           </div>
-          <div class="setting-item">
+          <div class="setting-item flash-setting-item">
             <label class="setting-label">外部字体</label>
-            <div class="setting-checkbox-box">
+            <div class="setting-checkbox-box flash-checkbox-box">
               <input v-model="flashFont" type="checkbox" />
               <span>Flash</span>
+              <div class="flash-addr-inline" :class="{ disabled: !flashFont }">
+                <label class="flash-addr-label" for="flash-addr-input">偏移地址</label>
+                <input
+                  id="flash-addr-input"
+                  v-model="flashAddr"
+                  type="text"
+                  class="form-input flash-addr-input"
+                  placeholder="0x00000000"
+                  title="外部 Flash 中 .bin 位图数据的起始地址，写入生成代码中的 .flash_addr"
+                  :disabled="!flashFont"
+                  @blur="normalizeFlashAddr"
+                />
+              </div>
             </div>
           </div>
           <div class="setting-item">
@@ -245,11 +297,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { resolve, join } from '@tauri-apps/api/path';
-import { nextTick } from 'vue';
+import { documentDir, join } from '@tauri-apps/api/path';
 
 const fontFileName = ref('');
 const fontFilePath = ref(localStorage.getItem('lastFontFilePath') || '');
@@ -271,6 +322,8 @@ const align = ref(1);
 const compress = ref(false);
 const smartMono = ref(false);
 const flashFont = ref(false);
+/* 外部 Flash 中 .bin 位图的起始地址，生成代码里对应 .flash_addr */
+const flashAddr = ref(localStorage.getItem('lastFlashAddr') || '0x00000000');
 const charSpacing = ref(0);
 const isConverting = ref(false);
 const infoMessagesRef = ref(null);
@@ -279,6 +332,89 @@ const showCopyTip = ref(false);
 
 const canConvert = computed(() => {
   return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
+});
+
+/* ---------- Windows 本地系统字体库 ---------- */
+
+const systemFonts = ref([]);
+const fontPickerOpen = ref(false);
+const fontSearch = ref('');
+const fontsLoading = ref(false);
+const fontPickerRef = ref(null);
+const fontSearchRef = ref(null);
+
+const filteredSystemFonts = computed(() => {
+  const keyword = fontSearch.value.trim().toLowerCase();
+  if (!keyword) return systemFonts.value;
+  return systemFonts.value.filter(
+    font => font.name.toLowerCase().includes(keyword) || font.file.toLowerCase().includes(keyword)
+  );
+});
+
+async function loadSystemFonts() {
+  fontsLoading.value = true;
+  try {
+    // Rust 侧扫描 %WINDIR%\Fonts 与当前用户字体目录，并解析 name 表得到可读字体名
+    systemFonts.value = await invoke('list_system_fonts');
+  } catch (err) {
+    console.error('读取系统字体库失败：', err);
+    systemFonts.value = [];
+  } finally {
+    fontsLoading.value = false;
+  }
+}
+
+function toggleFontPicker() {
+  fontPickerOpen.value = !fontPickerOpen.value;
+  if (fontPickerOpen.value) {
+    fontSearch.value = '';
+    nextTick(() => fontSearchRef.value?.focus());
+  }
+}
+
+function chooseSystemFont(font) {
+  fontFilePath.value = font.path;
+  fontFileName.value = font.file;
+  autoGenerateFontName();
+  localStorage.setItem('lastFontFilePath', font.path);
+  fontPickerOpen.value = false;
+  addInfoMessage(`已选择系统字体：${font.name} (${font.file})`, 'info');
+}
+
+function onDocumentClick(event) {
+  if (fontPickerOpen.value && fontPickerRef.value && !fontPickerRef.value.contains(event.target)) {
+    fontPickerOpen.value = false;
+  }
+}
+
+function onDocumentKeydown(event) {
+  if (event.key === 'Escape') fontPickerOpen.value = false;
+}
+
+onMounted(async () => {
+  document.addEventListener('click', onDocumentClick);
+  document.addEventListener('keydown', onDocumentKeydown);
+
+  // 输出文件夹默认使用 Windows「文档」目录；用户手动选择过则沿用上次路径
+  if (!outputDirPath.value) {
+    try {
+      const dir = await documentDir();
+      if (dir) {
+        outputDirPath.value = dir;
+        outputDirName.value = dir.split(/[/\\]/).pop() || 'Documents';
+      }
+    } catch (err) {
+      console.error('获取文档目录失败：', err);
+      addInfoMessage('获取默认文档目录失败，请手动选择输出文件夹', 'error');
+    }
+  }
+
+  loadSystemFonts();
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick);
+  document.removeEventListener('keydown', onDocumentKeydown);
 });
 
 /* ---------- 字体名称自动生成 ---------- */
@@ -317,6 +453,35 @@ watch(flashFont, (checked) => {
     compress.value = false;
   }
 });
+
+/* 记住上次填写的偏移地址，同一块板上一般固定不变 */
+watch(flashAddr, (value) => {
+  localStorage.setItem('lastFlashAddr', value);
+});
+
+/* 偏移地址支持 0x 十六进制或十进制，统一规范为 0xXXXXXXXX */
+function normalizeFlashAddr() {
+  const raw = String(flashAddr.value ?? '').trim();
+  if (raw === '') {
+    flashAddr.value = '0x00000000';
+    return true;
+  }
+
+  let value = NaN;
+  if (/^0x[0-9a-f]+$/i.test(raw)) {
+    value = parseInt(raw.slice(2), 16);
+  } else if (/^[0-9]+$/.test(raw)) {
+    value = parseInt(raw, 10);
+  }
+
+  if (!Number.isFinite(value) || value < 0 || value > 0xFFFFFFFF) {
+    addInfoMessage('偏移地址无效，请输入 0x 开头的十六进制或十进制（0 ~ 0xFFFFFFFF）', 'error');
+    return false;
+  }
+
+  flashAddr.value = `0x${value.toString(16).toUpperCase().padStart(8, '0')}`;
+  return true;
+}
 
 /* 页面加载时，如果已从 localStorage 恢复上次的字体文件路径，自动生成字体名称 */
 autoGenerateFontName();
@@ -612,8 +777,13 @@ async function convertFont() {
     }
 
     if (flashFont.value) {
+      // 先校验并规范化偏移地址，再传给 C 取模工具写入 .flash_addr
+      if (!normalizeFlashAddr()) {
+        addInfoMessage('转换已取消：请先修正偏移地址', 'error');
+        return;
+      }
       // 外部Flash字体自动启用等宽块共享描述符，节省内部Flash字体表
-      args.push('--flash', '--fixed');
+      args.push('--flash', '--fixed', '--flash-addr', flashAddr.value);
     }
 
     if (charSpacing.value > 0) {
@@ -626,11 +796,10 @@ async function convertFont() {
       const outputFileName = fontName.value ? `${fontName.value}.c` : `font_${fontSize.value}px_bpp${bpp.value}.c`;
       outputFullPath = await join(outputDirPath.value, outputFileName);
     } else {
-      // 使用默认输出路径
-      const { appDir } = await import('@tauri-apps/api/path');
-      const appDirPath = await appDir();
+      // 兜底：输出目录被清空时仍写到「文档」目录，避免落在只读的程序目录
+      const docDir = await documentDir();
       const outputFileName = fontName.value ? `${fontName.value}.c` : `font_${fontSize.value}px_bpp${bpp.value}.c`;
-      outputFullPath = await join(appDirPath, outputFileName);
+      outputFullPath = await join(docDir, outputFileName);
     }
     args.push('--output', outputFullPath);
 
@@ -707,6 +876,7 @@ async function convertFont() {
     if (flashFont.value) {
       const binPath = outputFullPath.replace(/\.c$/i, '.bin');
       addInfoMessage(`已生成外部字体位图文件: ${binPath}`, 'info');
+      addInfoMessage(`外部字体偏移地址(.flash_addr): ${flashAddr.value}`, 'info');
     }
 
   } catch (err) {
@@ -837,6 +1007,116 @@ h2 {
   border-color: #ccc;
 }
 
+/* 浏览按钮右侧：Windows 本地系统字体库下拉列表 */
+.system-font-picker {
+  position: relative;
+  flex: none;
+}
+
+.system-font-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.system-font-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+  border-color: #ccc;
+}
+
+.system-font-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.picker-arrow {
+  font-size: 12px;
+  transition: transform 0.2s;
+}
+
+.picker-arrow.open {
+  transform: rotate(180deg);
+}
+
+.system-font-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  width: 320px;
+  padding: 8px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+
+.font-search-input {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.font-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.font-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.font-list-item:hover {
+  background: #f0f5ff;
+}
+
+.font-list-item.active {
+  background: #e6f7ff;
+}
+
+.font-item-name {
+  max-width: 100%;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.font-item-file {
+  font-size: 11px;
+  color: #999;
+  font-family: Consolas, 'Courier New', monospace;
+}
+
+.font-list-empty {
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  padding: 20px 0;
+}
+
 .file-path {
   font-size: 12px;
   color: #666;
@@ -901,6 +1181,57 @@ h2 {
 
 .setting-checkbox-box.disabled {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 外部字体：勾选框与偏移地址共用同一个外框 */
+.flash-setting-item {
+  flex: 2;
+}
+
+.flash-checkbox-box {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 8px;
+  cursor: default;
+}
+
+.flash-checkbox-box > span {
+  flex: none;
+}
+
+.flash-addr-inline {
+  display: flex;
+  flex: 1 1 150px;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.flash-addr-inline.disabled {
+  opacity: 0.5;
+}
+
+.flash-addr-label {
+  flex: none;
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.flash-addr-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  text-align: right;
+  background: white;
+}
+
+.flash-addr-input:disabled {
   cursor: not-allowed;
 }
 
@@ -1437,6 +1768,53 @@ html.dark .file-select-btn:hover {
   background: #5588ee;
 }
 
+html.dark .system-font-btn {
+  background: #6699ff;
+  border-color: #6699ff;
+  color: white;
+}
+
+html.dark .system-font-btn:hover:not(:disabled) {
+  background: #5588ee;
+  border-color: #5588ee;
+}
+
+html.dark .system-font-dropdown {
+  background: #252a3a;
+  border-color: #3a3f55;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+html.dark .system-font-dropdown .font-search-input {
+  background: #1c2030;
+  border-color: #3a3f55;
+  color: #e0e0e0;
+}
+
+html.dark .system-font-dropdown .font-search-input:focus {
+  border-color: #6699ff;
+}
+
+html.dark .font-list-item:hover {
+  background: #2f354a;
+}
+
+html.dark .font-list-item.active {
+  background: #1a2e3a;
+}
+
+html.dark .font-item-name {
+  color: #e0e0e0;
+}
+
+html.dark .font-item-file {
+  color: #8a90a5;
+}
+
+html.dark .font-list-empty {
+  color: #888;
+}
+
 html.dark .info-bar {
   background: #252a3a;
   border-color: #3a3f55;
@@ -1516,5 +1894,25 @@ html.dark .setting-checkbox-box span {
 
 html.dark .setting-checkbox-box input[type="checkbox"] {
   accent-color: #6699ff;
+}
+
+html.dark .flash-checkbox-box {
+  background: #252a3a;
+  border-color: #3a3f55;
+}
+
+html.dark .flash-addr-label {
+  color: #e0e0e0;
+}
+
+html.dark .setting-checkbox-box .flash-addr-input {
+  background: #1c2030;
+  border-color: #3a3f55;
+  color: #e0e0e0;
+}
+
+html.dark .setting-checkbox-box .flash-addr-input:focus {
+  background: #252a3a;
+  border-color: #6699ff;
 }
 </style>

@@ -4,6 +4,7 @@
 #include "font_render.h"
 #include "cmap_builder.h"
 #include <stdio.h>
+#include <stdint.h>
 
 typedef struct {
     const font_data_t *font;
@@ -15,6 +16,7 @@ typedef struct {
     int                spacing;     /* extra pixel spacing between characters */
     int                fixed;       /* share one descriptor per monospaced block */
     int                flash;       /* external flash font: bitmap goes to bin_path */
+    uint32_t           flash_addr;  /* offset of the .bin blob inside external flash */
     const char        *bin_path;   /* output path of the bitmap blob (.bin) */
 } writer_ctx_t;
 

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -52,6 +53,9 @@ static void print_usage(const char *prog)
         "  --flash               External flash font: bitmap is written to a .bin file\n"
         "                        (same name as --output, .bin extension) and the\n"
         "                        generated font uses SGL_FONT_FMT_EXT_FLASH\n"
+        "  --flash-addr <addr>   Start address of the .bin blob in external flash,\n"
+        "                        hex (0x...) or decimal, 0 ~ 0xFFFFFFFF; written to\n"
+        "                        the generated font's .flash_addr (default 0)\n"
         "\n"
         "Example (single font):\n"
         "  %s --font font.otf --symbols-file chinese.txt --size 24 --bpp 4 --output out.c\n"
@@ -211,6 +215,7 @@ int main(int argc, char *argv[])
     int spacing_val = 0;
     int fixed_flag = 0;
     int flash_flag = 0;
+    uint32_t flash_addr = 0;
 
     font_entry_t *font_head = NULL;
     font_entry_t *font_tail = NULL;
@@ -255,6 +260,19 @@ int main(int argc, char *argv[])
             fixed_flag = 1;
         } else if (strcmp(argv[i], "--flash") == 0) {
             flash_flag = 1;
+        } else if (strcmp(argv[i], "--flash-addr") == 0 && i + 1 < argc) {
+            const char *raw = argv[++i];
+            char *end = NULL;
+            errno = 0;
+            unsigned long val = strtoul(raw, &end, 0);
+            if (end == raw || *end != '\0' || errno == ERANGE || val > 0xFFFFFFFFUL) {
+                fprintf(stderr,
+                        "Error: invalid --flash-addr '%s' (expect 0x hex or decimal, 0 ~ 0xFFFFFFFF)\n",
+                        raw);
+                free_font_entries(font_head);
+                return 1;
+            }
+            flash_addr = (uint32_t)val;
         } else if (strcmp(argv[i], "--symbols") == 0 && i + 1 < argc) {
             if (!current_entry) {
                 fprintf(stderr, "Error: --symbols must follow a --font\n");
@@ -464,6 +482,7 @@ int main(int argc, char *argv[])
         .spacing = spacing_val,
         .fixed = fixed_flag,
         .flash = flash_flag,
+        .flash_addr = flash_addr,
         .bin_path = bin_path
     };
 

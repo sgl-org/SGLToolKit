@@ -17,12 +17,10 @@ fn extract_embedded_exe() -> Result<std::path::PathBuf, String> {
     
     let exe_path = temp_dir.join("sgl_font_conv.exe");
     
-    // 如果已存在且大小匹配，直接返回（避免重复写入）
-    if exe_path.exists() {
-        if let Ok(metadata) = std::fs::metadata(&exe_path) {
-            if metadata.len() == SGL_FONT_CONV_EXE.len() as u64 {
-                return Ok(exe_path);
-            }
+    // 内容一致才复用（只比大小会漏掉体积相同的旧版本，导致新参数不生效）
+    if let Ok(existing) = std::fs::read(&exe_path) {
+        if existing.as_slice() == SGL_FONT_CONV_EXE {
+            return Ok(exe_path);
         }
     }
     
@@ -90,6 +88,216 @@ fn get_file_size(path: String) -> Result<u64, String> {
     std::fs::metadata(&path)
         .map(|m| m.len())
         .map_err(|e| format!("读取文件大小失败: {}", e))
+}
+
+// ---------- Windows 本地系统字体库 ----------
+
+#[derive(Clone, serde::Serialize)]
+struct SystemFont {
+    /// 面向用户的显示名（字体家族 + 非默认样式）
+    name: String,
+    /// 字体文件名，便于区分同一家族的不同字重
+    file: String,
+    /// 字体文件完整路径，可直接传给 sgl_font_conv
+    path: String,
+}
+
+/// 解析 sfnt（TTF/OTF/TTC）的 name 表，返回 (家族名, 样式名)。
+/// 只按字节偏移读取表目录与 name 表，不整文件载入，几百个系统字体也能快速枚举。
+fn font_name_from_file(path: &std::path::Path) -> Option<(String, String)> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    fn read_at(f: &mut std::fs::File, off: u64, len: usize) -> Option<Vec<u8>> {
+        f.seek(SeekFrom::Start(off)).ok()?;
+        let mut buf = vec![0u8; len];
+        f.read_exact(&mut buf).ok()?;
+        Some(buf)
+    }
+    fn u16be(b: &[u8], i: usize) -> u16 {
+        u16::from_be_bytes([b[i], b[i + 1]])
+    }
+    fn u32be(b: &[u8], i: usize) -> u32 {
+        u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+    }
+    fn decode(platform: u16, raw: &[u8]) -> String {
+        if platform == 0 || platform == 3 {
+            // Windows / Unicode 平台：UTF-16BE
+            let units: Vec<u16> = raw
+                .chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&units)
+        } else {
+            // Macintosh 平台按单字节处理，中文名在 Windows 字体里基本都另有 Unicode 记录
+            raw.iter().map(|&b| b as char).collect()
+        }
+    }
+
+    let mut f = std::fs::File::open(path).ok()?;
+    let head = read_at(&mut f, 0, 12)?;
+    // TTC 字体集合：第一个 face 的表目录偏移位于 12..16
+    let dir_off = if head.starts_with(b"ttcf") {
+        let t = read_at(&mut f, 12, 4)?;
+        u32be(&t, 0) as u64
+    } else {
+        0
+    };
+
+    let ot = read_at(&mut f, dir_off, 12)?;
+    let count = u16be(&ot, 4) as usize;
+    if count == 0 || count > 512 {
+        return None;
+    }
+    let records = read_at(&mut f, dir_off + 12, count * 16)?;
+    let mut name_off = 0u32;
+    let mut name_len = 0u32;
+    for i in 0..count {
+        let r = &records[i * 16..i * 16 + 16];
+        if r.starts_with(b"name") {
+            name_off = u32be(r, 8);
+            name_len = u32be(r, 12);
+            break;
+        }
+    }
+    if name_off == 0 || name_len == 0 || name_len > 4 * 1024 * 1024 {
+        return None;
+    }
+
+    let nb = read_at(&mut f, name_off as u64, name_len as usize)?;
+    if nb.len() < 6 {
+        return None;
+    }
+    let n = u16be(&nb, 2) as usize;
+    let str_base = u16be(&nb, 4) as usize;
+    if n == 0 || n > 4096 {
+        return None;
+    }
+
+    // 同一 nameID 会有多语言记录：优先简中，其次其它中文、英文，最后其它
+    let mut family: Option<(i32, String)> = None;
+    let mut style: Option<(i32, String)> = None;
+    for i in 0..n {
+        let p = 6 + i * 12;
+        if p + 12 > nb.len() {
+            break;
+        }
+        let rec = &nb[p..p + 12];
+        let name_id = u16be(rec, 6);
+        if name_id != 1 && name_id != 2 {
+            continue; // 1 = Family, 2 = Subfamily
+        }
+        let platform = u16be(rec, 0);
+        let lang = u16be(rec, 4);
+        let len = u16be(rec, 8) as usize;
+        let off = str_base + u16be(rec, 10) as usize;
+        if off + len > nb.len() {
+            continue;
+        }
+        let text = decode(platform, &nb[off..off + len]).trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let score = match (platform, lang) {
+            (3, 0x0804) => 100,                            // 简体中文
+            (3, 0x0404) | (3, 0x0C04) | (3, 0x1004) => 90, // 繁体中文
+            (3, 0x0409) => 80,                             // 英文（美国）
+            (3, _) => 60,
+            (0, _) => 50,
+            (1, _) => 40,
+            _ => 20,
+        };
+        let slot = if name_id == 1 { &mut family } else { &mut style };
+        if slot.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+            *slot = Some((score, text));
+        }
+    }
+
+    family.map(|(_, f)| (f, style.map(|(_, s)| s).unwrap_or_default()))
+}
+
+/// 枚举本机安装的字体：系统字体目录 + 当前用户字体目录（Windows 10+ 免管理员安装的字体）
+fn collect_system_fonts() -> Vec<SystemFont> {
+    use std::path::{Path, PathBuf};
+
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    match std::env::var("WINDIR") {
+        Ok(windir) => dirs.push(Path::new(&windir).join("Fonts")),
+        Err(_) if cfg!(windows) => dirs.push(PathBuf::from(r"C:\Windows\Fonts")),
+        Err(_) => {}
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        dirs.push(Path::new(&local).join("Microsoft").join("Windows").join("Fonts"));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut fonts: Vec<SystemFont> = Vec::new();
+    for dir in dirs {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue, // 目录不存在或不可读时跳过
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            // .fon 是位图字体，FreeType 转换器无法使用，这里不列出
+            if !matches!(ext.as_str(), "ttf" | "otf" | "ttc" | "otc") {
+                continue;
+            }
+            if !seen.insert(path.to_string_lossy().to_ascii_lowercase()) {
+                continue;
+            }
+            let file = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let fallback = if stem.is_empty() { file.clone() } else { stem };
+            let (family, style) =
+                font_name_from_file(&path).unwrap_or_else(|| (fallback, String::new()));
+            let is_regular = style.is_empty()
+                || matches!(
+                    style.to_ascii_lowercase().as_str(),
+                    "regular" | "normal" | "book" | "roman" | "常规" | "标准" | "正常"
+                );
+            let name = if is_regular {
+                family
+            } else {
+                format!("{} {}", family, style)
+            };
+            fonts.push(SystemFont {
+                name,
+                file,
+                path: path.to_string_lossy().to_string(),
+            });
+        }
+    }
+    fonts.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then(a.file.cmp(&b.file))
+    });
+    fonts
+}
+
+/// 扫描放到阻塞线程池执行，避免大字体目录拖慢 WebView 主线程
+#[tauri::command]
+async fn list_system_fonts() -> Vec<SystemFont> {
+    tauri::async_runtime::spawn_blocking(collect_system_fonts)
+        .await
+        .unwrap_or_default()
 }
 
 // 移动/重命名文件（Windows 下目标已存在时直接覆盖）
@@ -428,13 +636,29 @@ async fn zip_files(files: Vec<ZipFile>, output_path: String) -> std::collections
     result
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn system_fonts_available() {
+        if cfg!(windows) {
+            let fonts = super::collect_system_fonts();
+            assert!(!fonts.is_empty(), "应至少枚举到一个系统字体");
+            assert!(fonts.iter().all(|f| !f.name.is_empty() && !f.path.is_empty()));
+            println!("系统字体数量: {}", fonts.len());
+            for f in fonts.iter().take(3) {
+                println!("{} -> {}", f.name, f.path);
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, run_shell_command, get_file_size, move_file, remove_file, run_ffmpeg_with_progress, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
+        .invoke_handler(tauri::generate_handler![greet, run_shell_command, get_file_size, list_system_fonts, move_file, remove_file, run_ffmpeg_with_progress, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
