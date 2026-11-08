@@ -8,6 +8,27 @@ static SGL_FONT_CONV_EXE: &[u8] = include_bytes!("../binaries/sgl_font_conv-x86_
 #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 static SGL_FONT_CONV_EXE: &[u8] = &[];
 
+// 内置图标字体：编译期一起打进 exe，运行时释放到临时目录后即可被前端与取模工具读取。
+// 新增字体时，把文件放进 binaries/ 并在下面数组里加一行即可（tauri.conf.json 的 resources 同步补一份）。
+static BUILTIN_ICON_FONTS: &[(&str, &[u8])] = &[
+    ("FontAwesome.otf", include_bytes!("../binaries/FontAwesome.otf")),
+    ("Blockheads United.ttf", include_bytes!("../binaries/Blockheads United.ttf")),
+    ("CatgirlSystemFont-Regular.otf", include_bytes!("../binaries/CatgirlSystemFont-Regular.otf")),
+    ("Floralia Dingbat.ttf", include_bytes!("../binaries/Floralia Dingbat.ttf")),
+    ("HazardSigns.ttf", include_bytes!("../binaries/HazardSigns.ttf")),
+    ("Herlora Floral Dingbat.ttf", include_bytes!("../binaries/Herlora Floral Dingbat.ttf")),
+    ("MaterialIcons-Regular.ttf", include_bytes!("../binaries/MaterialIcons-Regular.ttf")),
+    ("MaterialIconsOutlined-Regular.otf", include_bytes!("../binaries/MaterialIconsOutlined-Regular.otf")),
+    ("MaterialIconsRound-Regular.otf", include_bytes!("../binaries/MaterialIconsRound-Regular.otf")),
+    ("MaterialIconsSharp-Regular.otf", include_bytes!("../binaries/MaterialIconsSharp-Regular.otf")),
+    ("MaterialIconsTwoTone-Regular.otf", include_bytes!("../binaries/MaterialIconsTwoTone-Regular.otf")),
+    ("Numberpile.otf", include_bytes!("../binaries/Numberpile.otf")),
+    ("Oil Crisis A.otf", include_bytes!("../binaries/Oil Crisis A.otf")),
+    ("Oil Crisis B.otf", include_bytes!("../binaries/Oil Crisis B.otf")),
+    ("Type Icons.ttf", include_bytes!("../binaries/Type Icons.ttf")),
+    ("icon-works-webfont.ttf", include_bytes!("../binaries/icon-works-webfont.ttf")),
+];
+
 // 提取嵌入的 exe 到临时目录，返回 exe 路径
 fn extract_embedded_exe() -> Result<std::path::PathBuf, String> {
     use std::io::Write;
@@ -28,6 +49,65 @@ fn extract_embedded_exe() -> Result<std::path::PathBuf, String> {
     file.write_all(SGL_FONT_CONV_EXE).map_err(|e| format!("写入临时文件失败: {}", e))?;
     
     Ok(exe_path)
+}
+
+// ---------- 内置图标字体（随程序打包，用户可直接选用） ----------
+
+#[derive(Clone, serde::Serialize)]
+struct BuiltinIconFont {
+    /// 面向用户的显示名
+    name: String,
+    /// 文件名
+    file: String,
+    /// 释放后的磁盘绝对路径
+    path: String,
+}
+
+/// 把内嵌字体释放到与 sidecar 相同的临时目录，内容一致则直接复用。
+/// 返回绝对路径：前端用它解析预览，C 取模工具可直接作为 --font 参数读取。
+fn extract_builtin_font(file_name: &str, data: &[u8]) -> Result<String, String> {
+    let temp_dir = std::env::temp_dir().join("sgltoolkit_sidecar");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("创建临时目录失败: {}", e))?;
+
+    let path = temp_dir.join(file_name);
+    if let Ok(existing) = std::fs::read(&path) {
+        if existing.as_slice() == data {
+            return Ok(path.to_string_lossy().into_owned());
+        }
+    }
+    std::fs::write(&path, data).map_err(|e| format!("写入内置字体失败: {}", e))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// 列出随工具打包的全部内置图标字体，供「图标字体文件」处逐个添加到预览。
+/// 显示名直接读字体的 name 表（与系统字体一致），解析失败时回退到文件名。
+#[tauri::command]
+fn list_builtin_icon_fonts() -> Result<Vec<BuiltinIconFont>, String> {
+    let mut fonts = Vec::with_capacity(BUILTIN_ICON_FONTS.len());
+    for (file, data) in BUILTIN_ICON_FONTS {
+        let path = extract_builtin_font(file, data)?;
+        let fallback = std::path::Path::new(file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(file)
+            .to_string();
+        let name = font_name_from_file(std::path::Path::new(&path))
+            .map(|(family, style)| {
+                let regular = style.is_empty()
+                    || matches!(
+                        style.to_ascii_lowercase().as_str(),
+                        "regular" | "normal" | "book" | "roman" | "常规" | "标准" | "正常"
+                    );
+                if regular { family } else { format!("{} {}", family, style) }
+            })
+            .unwrap_or(fallback);
+        fonts.push(BuiltinIconFont {
+            name,
+            file: (*file).to_string(),
+            path,
+        });
+    }
+    Ok(fonts)
 }
 
 #[derive(Deserialize)]
@@ -639,6 +719,21 @@ async fn zip_files(files: Vec<ZipFile>, output_path: String) -> std::collections
 #[cfg(test)]
 mod tests {
     #[test]
+    fn builtin_icon_fonts_are_embedded_and_extractable() {
+        let fonts = super::list_builtin_icon_fonts().unwrap();
+        assert_eq!(fonts.len(), super::BUILTIN_ICON_FONTS.len());
+        assert!(fonts.len() >= 16);
+        for (i, font) in fonts.iter().enumerate() {
+            let (expected_file, expected_bytes) = super::BUILTIN_ICON_FONTS[i];
+            assert_eq!(font.file, expected_file);
+            assert!(!font.name.is_empty());
+            let extracted = std::fs::read(&font.path).unwrap();
+            assert_eq!(extracted.as_slice(), expected_bytes);
+            println!("内置图标字体: {} ({}) -> {}", font.name, font.file, font.path);
+        }
+    }
+
+    #[test]
     fn system_fonts_available() {
         if cfg!(windows) {
             let fonts = super::collect_system_fonts();
@@ -658,7 +753,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, run_shell_command, get_file_size, list_system_fonts, move_file, remove_file, run_ffmpeg_with_progress, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
+        .invoke_handler(tauri::generate_handler![greet, run_shell_command, get_file_size, list_system_fonts, list_builtin_icon_fonts, move_file, remove_file, run_ffmpeg_with_progress, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

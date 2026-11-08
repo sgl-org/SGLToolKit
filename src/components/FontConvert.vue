@@ -212,49 +212,152 @@
         <label class="form-label">图标字体文件</label>
         <div class="file-input-wrapper">
           <input
-            v-model="iconFontFilePath"
+            :value="iconFontSummary"
             type="text"
-            placeholder="选择图标字体文件路径"
+            placeholder="点「添加」可多次添加图标字体，图标会追加到下方预览"
             class="form-input path-input"
             readonly
           />
-          <button class="file-select-btn" @click="selectIconFontFile">浏览</button>
+          <button class="file-select-btn" @click="addIconFontFiles">添加</button>
+          <div class="system-font-picker" ref="iconFontPickerRef">
+            <button
+              class="system-font-btn"
+              type="button"
+              :disabled="builtinFontsLoading"
+              :title="builtinFontsLoading ? '正在准备内置图标字体...' : '选择随工具打包的内置图标字体，点一项即追加到预览'"
+              @click="toggleIconFontPicker"
+            >
+              {{ builtinFontsLoading ? '加载中...' : '内置图标 (' + builtinIconFonts.length + ')' }}
+              <span class="picker-arrow" :class="{ open: iconFontPickerOpen }">▾</span>
+            </button>
+            <div v-if="iconFontPickerOpen" class="system-font-dropdown">
+              <input
+                ref="iconFontSearchRef"
+                v-model="iconFontSearch"
+                type="text"
+                class="form-input font-search-input"
+                placeholder="搜索内置图标字体"
+                @keydown.esc="iconFontPickerOpen = false"
+              />
+              <div class="font-list">
+                <button
+                  v-for="font in filteredBuiltinIconFonts"
+                  :key="font.file"
+                  type="button"
+                  class="font-list-item"
+                  :class="{ active: isBuiltinFontAdded(font) }"
+                  :title="isBuiltinFontAdded(font) ? '已添加：' + font.path : font.path"
+                  @click="addBuiltinIconFont(font)"
+                >
+                  <span class="font-item-name">{{ isBuiltinFontAdded(font) ? '✓ ' : '' }}{{ font.name }}</span>
+                  <span class="font-item-file">{{ font.file }}</span>
+                </button>
+                <div v-if="filteredBuiltinIconFonts.length === 0" class="font-list-empty">
+                  {{ builtinIconFonts.length === 0 ? '未找到内置图标字体' : '没有匹配的字体' }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-if="iconFonts.length > 0" class="added-font-tags">
+          <span
+            v-for="font in iconFonts"
+            :key="font.id"
+            class="added-font-tag"
+            :title="font.path"
+          >
+            <span class="added-font-name">{{ font.name }}</span>
+            <span class="added-font-count">{{ font.iconCount }} 个图标</span>
+            <span class="remove-tag" title="移除该字体及其图标" @click="removeIconFont(font.id)">×</span>
+          </span>
+          <button class="clear-fonts-btn" type="button" @click="clearIconFonts">清空</button>
         </div>
       </div>
 
-      <div class="form-section" v-if="iconFontFilePath">
+      <div class="form-section" v-if="iconFonts.length > 0">
         <div class="form-label-with-button">
-          <label class="form-label">图标预览</label>
+          <label class="form-label">图标预览（{{ iconList.length }} 个图标 / {{ iconFonts.length }} 个字体，可滚动查看全部）</label>
           <div class="preview-btn-group">
             <button class="select-all-btn" @click="selectAllIcons">全选</button>
             <button class="deselect-all-btn" @click="deselectAllIcons">全删</button>
           </div>
         </div>
-        <div class="icon-preview-container">
-          <div
-            v-for="(icon, index) in iconList"
-            :key="index"
-            class="icon-item"
-            @click="toggleIconSelection(icon)"
-            :class="{ selected: selectedIcons.includes(icon) }"
-          >
-            <div class="icon-char">{{ icon.char }}</div>
-            <div class="icon-code">U+{{ icon.code > 0xFFFF ? icon.code.toString(16).toUpperCase().padStart(6, '0') : icon.code.toString(16).toUpperCase().padStart(4, '0') }}</div>
+        <div class="preview-color-bar" title="仅改变此处的预览配色，不影响取模生成的位图数据">
+          <span class="preview-color-title">预览配色</span>
+          <label class="preview-color-field">
+            <span>图标</span>
+            <input v-model="previewFgPicker" type="color" aria-label="预览图标颜色" />
+          </label>
+          <label class="preview-color-field">
+            <span>背景</span>
+            <input v-model="previewBgPicker" type="color" aria-label="预览背景颜色" />
+          </label>
+          <div class="preview-color-presets">
+            <button
+              v-for="preset in previewColorPresets"
+              :key="preset.key"
+              type="button"
+              class="preview-color-preset"
+              :class="{ active: isPreviewPresetActive(preset) }"
+              :title="preset.title"
+              @click="applyPreviewPreset(preset)"
+            >
+              <span class="preset-swatch" :style="{ color: preset.fg || defaultPreviewFg, background: preset.bg || defaultPreviewBg }">A</span>
+              {{ preset.label }}
+            </button>
           </div>
-          <div v-if="iconList.length === 0" class="no-icons">暂无图标</div>
+          <span class="preview-color-hint">仅影响预览</span>
+        </div>
+        <div v-for="font in iconFonts" :key="font.id" class="icon-font-group">
+          <div class="icon-font-group-header">
+            <span class="icon-font-group-name" :title="font.path">{{ font.name }}</span>
+            <span class="icon-font-group-count">{{ iconsOfFont(font.id).length }} 个图标 · {{ font.file }}</span>
+            <div class="preview-btn-group">
+              <button class="select-all-btn" @click="selectFontIcons(font.id)">选本组</button>
+              <button class="deselect-all-btn" @click="deselectFontIcons(font.id)">清本组</button>
+              <button class="group-toggle-btn" @click="toggleFontGroup(font.id)">
+                {{ isCollapsed(font.id) ? '展开' : '折叠' }}
+              </button>
+            </div>
+          </div>
+          <div v-if="!isCollapsed(font.id)" class="icon-preview-container" :style="iconPreviewStyle">
+            <div
+              v-for="icon in iconsOfFont(font.id)"
+              :key="icon.key"
+              class="icon-item"
+              :class="{ selected: isIconSelected(icon) }"
+              :title="icon.fontName + ' · ' + icon.name"
+              @click="toggleIconSelection(icon)"
+            >
+              <div class="icon-char">
+                <svg v-if="icon.svg" class="icon-glyph" :viewBox="icon.svg.viewBox" aria-hidden="true">
+                  <path :d="icon.svg.d" />
+                </svg>
+                <span v-else :style="{ fontFamily: icon.family + ', sans-serif' }">{{ icon.char }}</span>
+              </div>
+              <div class="icon-code">U+{{ icon.code > 0xFFFF ? icon.code.toString(16).toUpperCase().padStart(6, '0') : icon.code.toString(16).toUpperCase().padStart(4, '0') }}</div>
+            </div>
+            <div v-if="iconsOfFont(font.id).length === 0" class="no-icons">暂无图标</div>
+          </div>
         </div>
       </div>
 
-      <div class="form-section" v-if="iconFontFilePath && selectedIcons.length > 0">
-        <label class="form-label">选中预览</label>
-        <div class="icon-preview-container">
+      <div class="form-section" v-if="selectedIcons.length > 0">
+        <label class="form-label">选中预览（{{ selectedIcons.length }}）</label>
+        <div class="icon-preview-container" :style="iconPreviewStyle">
           <div
-            v-for="(icon, index) in selectedIcons"
-            :key="index"
+            v-for="icon in selectedIcons"
+            :key="icon.key"
             class="icon-item selected"
+            :title="icon.fontName"
             @click="toggleIconSelection(icon)"
           >
-            <div class="icon-char">{{ icon.char }}</div>
+            <div class="icon-char">
+              <svg v-if="icon.svg" class="icon-glyph" :viewBox="icon.svg.viewBox" aria-hidden="true">
+                <path :d="icon.svg.d" />
+              </svg>
+              <span v-else :style="{ fontFamily: icon.family + ', sans-serif' }">{{ icon.char }}</span>
+            </div>
             <div class="icon-code">U+{{ icon.code > 0xFFFF ? icon.code.toString(16).toUpperCase().padStart(6, '0') : icon.code.toString(16).toUpperCase().padStart(4, '0') }}</div>
           </div>
         </div>
@@ -316,7 +419,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, markRaw } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { documentDir, join } from '@tauri-apps/api/path';
@@ -394,10 +497,71 @@ watch(rangePreset, (value) => {
 const customChars = ref('');
 const outputDirName = ref('');
 const outputDirPath = ref(localStorage.getItem('lastOutputDirPath') || '');
-const iconFontFilePath = ref('');
+/* 图标字体支持多次「添加」：每个字体独立 @font-face，预览按添加顺序追加。
+ * iconFonts: { id, name, file, path, family, url, format, iconCount, builtin }
+ * iconList : { key, code, char, name, fontId, family, fontName } */
+const iconFonts = ref([]);
 const iconList = ref([]);
 const selectedIcons = ref([]);
-const iconFontUrl = ref('');
+let nextIconFontId = 1;
+
+/* ---------- 图标预览配色（只影响预览显示，不进入取模数据） ---------- */
+
+/* 主题由 App.vue 写到 html.dark，这里跟随它的切换以计算默认色 */
+const isThemeDark = ref(document.documentElement.classList.contains('dark'));
+let themeObserver = null;
+const defaultPreviewFg = computed(() => isThemeDark.value ? '#e0e0e0' : '#333333');
+const defaultPreviewBg = computed(() => isThemeDark.value ? '#1a1d2b' : '#fafafa');
+
+/* 空字符串 = 跟随主题；有值 = 用户自定义颜色（持久化到 localStorage） */
+const previewFgColor = ref(localStorage.getItem('lastIconPreviewFg') || '');
+const previewBgColor = ref(localStorage.getItem('lastIconPreviewBg') || '');
+const previewColorPresets = [
+  { key: 'theme', label: '跟随主题', fg: '', bg: '', title: '跟随当前浅色 / 深色主题' },
+  { key: 'light', label: '浅底深图', fg: '#333333', bg: '#fafafa', title: '浅色背景 + 深色图标' },
+  { key: 'dark', label: '深底白图', fg: '#ffffff', bg: '#1a1d2b', title: '深色背景 + 白色图标' },
+];
+
+/* color input 需要始终有合法色值，取色器显示「当前实际生效」的颜色 */
+const previewFgPicker = computed({
+  get: () => previewFgColor.value || defaultPreviewFg.value,
+  set: value => { previewFgColor.value = value; },
+});
+const previewBgPicker = computed({
+  get: () => previewBgColor.value || defaultPreviewBg.value,
+  set: value => { previewBgColor.value = value; },
+});
+
+/* 内联 CSS 变量覆盖 .icon-preview-container 上的主题默认值 */
+const iconPreviewStyle = computed(() => {
+  const style = {};
+  if (previewFgColor.value) style['--icon-preview-fg'] = previewFgColor.value;
+  if (previewBgColor.value) {
+    style['--icon-preview-bg'] = previewBgColor.value;
+    style['--icon-preview-item-bg'] = previewBgColor.value;
+  }
+  return style;
+});
+
+function isPreviewPresetActive(preset) {
+  return previewFgColor.value === preset.fg && previewBgColor.value === preset.bg;
+}
+
+function applyPreviewPreset(preset) {
+  previewFgColor.value = preset.fg;
+  previewBgColor.value = preset.bg;
+}
+
+watch([previewFgColor, previewBgColor], ([fg, bg]) => {
+  if (fg) localStorage.setItem('lastIconPreviewFg', fg);
+  else localStorage.removeItem('lastIconPreviewFg');
+  if (bg) localStorage.setItem('lastIconPreviewBg', bg);
+  else localStorage.removeItem('lastIconPreviewBg');
+});
+const iconFontSummary = computed(() => {
+  if (iconFonts.value.length === 0) return '';
+  return `已添加 ${iconFonts.value.length} 个图标字体：${iconFonts.value.map(f => f.name).join('、')}`;
+});
 const align = ref(1);
 const compress = ref(false);
 const smartMono = ref(false);
@@ -411,7 +575,10 @@ const infoMessagesRef = ref(null);
 const showCopyTip = ref(false);
 
 const canConvert = computed(() => {
-  return fontFilePath.value && outputDirPath.value && (charRanges.value.length > 0 || customChars.value.trim() !== '' || selectedIcons.value.length > 0);
+  const hasMainContent = charRanges.value.length > 0 || customChars.value.trim() !== '';
+  // 只取图标（无字符范围/自定义字符）时不需要主字体；有范围则必须有主字体文件
+  if (hasMainContent && !fontFilePath.value) return false;
+  return !!outputDirPath.value && (hasMainContent || selectedIcons.value.length > 0);
 });
 
 /* ---------- Windows 本地系统字体库 ---------- */
@@ -461,19 +628,98 @@ function chooseSystemFont(font) {
   addInfoMessage(`已选择系统字体：${font.name} (${font.file})`, 'info');
 }
 
+/* ---------- 内置图标字体（随工具打包，点选即追加到预览） ---------- */
+
+const builtinIconFonts = ref([]);
+const builtinFontsLoading = ref(false);
+const iconFontPickerOpen = ref(false);
+const iconFontPickerRef = ref(null);
+const iconFontSearchRef = ref(null);
+const iconFontSearch = ref('');
+
+const filteredBuiltinIconFonts = computed(() => {
+  const keyword = iconFontSearch.value.trim().toLowerCase();
+  if (!keyword) return builtinIconFonts.value;
+  return builtinIconFonts.value.filter(
+    font => font.name.toLowerCase().includes(keyword) || font.file.toLowerCase().includes(keyword)
+  );
+});
+
+function isBuiltinFontAdded(font) {
+  return iconFonts.value.some(f => f.builtin && f.file === font.file);
+}
+
+/* 只记住内置字体（临时释放路径每次启动会变），本地字体路径不持久化 */
+function persistBuiltinIconFonts() {
+  const files = iconFonts.value.filter(f => f.builtin).map(f => f.file);
+  localStorage.setItem('lastBuiltinIconFonts', JSON.stringify(files));
+}
+
+async function loadBuiltinIconFonts() {
+  builtinFontsLoading.value = true;
+  try {
+    // Rust 侧把 include_bytes! 内嵌的全部图标字体释放到临时目录并返回绝对路径
+    builtinIconFonts.value = await invoke('list_builtin_icon_fonts');
+    let saved = [];
+    try {
+      const raw = JSON.parse(localStorage.getItem('lastBuiltinIconFonts') || '[]');
+      if (Array.isArray(raw)) saved = raw;
+    } catch { saved = []; }
+    localStorage.removeItem('lastBuiltinIconFont'); // 清理旧版单字体记录
+    for (const file of saved) {
+      const font = builtinIconFonts.value.find(f => f.file === file);
+      if (font) await addIconFontFromPath(font.path, font.file, font.name, true, true);
+    }
+  } catch (err) {
+    console.error('读取内置图标字体失败：', err);
+    builtinIconFonts.value = [];
+  } finally {
+    builtinFontsLoading.value = false;
+  }
+}
+
+function toggleIconFontPicker() {
+  iconFontPickerOpen.value = !iconFontPickerOpen.value;
+  if (iconFontPickerOpen.value) {
+    iconFontSearch.value = '';
+    nextTick(() => iconFontSearchRef.value?.focus());
+  }
+}
+
+async function addBuiltinIconFont(font) {
+  iconFontPickerOpen.value = false;
+  if (isBuiltinFontAdded(font)) {
+    addInfoMessage(`「${font.name}」已在预览中`, 'info');
+    return;
+  }
+  await addIconFontFromPath(font.path, font.file, font.name, true);
+}
+
 function onDocumentClick(event) {
   if (fontPickerOpen.value && fontPickerRef.value && !fontPickerRef.value.contains(event.target)) {
     fontPickerOpen.value = false;
   }
+  if (iconFontPickerOpen.value && iconFontPickerRef.value && !iconFontPickerRef.value.contains(event.target)) {
+    iconFontPickerOpen.value = false;
+  }
 }
 
 function onDocumentKeydown(event) {
-  if (event.key === 'Escape') fontPickerOpen.value = false;
+  if (event.key === 'Escape') {
+    fontPickerOpen.value = false;
+    iconFontPickerOpen.value = false;
+  }
 }
 
 onMounted(async () => {
   document.addEventListener('click', onDocumentClick);
   document.addEventListener('keydown', onDocumentKeydown);
+
+  // 「跟随主题」预览配色需要感知 App.vue 的主题切换
+  themeObserver = new MutationObserver(() => {
+    isThemeDark.value = document.documentElement.classList.contains('dark');
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
   // 输出文件夹默认使用 Windows「文档」目录；用户手动选择过则沿用上次路径
   if (!outputDirPath.value) {
@@ -490,11 +736,18 @@ onMounted(async () => {
   }
 
   loadSystemFonts();
+  loadBuiltinIconFonts();
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick);
   document.removeEventListener('keydown', onDocumentKeydown);
+  if (themeObserver) themeObserver.disconnect();
+  for (const font of iconFonts.value) {
+    if (font.url) URL.revokeObjectURL(font.url);
+  }
+  const style = document.getElementById('icon-font-style');
+  if (style) style.remove();
 });
 
 /* ---------- 字体名称自动生成 ---------- */
@@ -611,145 +864,275 @@ async function selectOutputDir() {
   }
 }
 
-async function selectIconFontFile() {
+/* ---------- 图标字体：多次添加、预览追加 ---------- */
+
+async function addIconFontFiles() {
   try {
     const selected = await open({
       directory: false,
-      multiple: false,
-      title: '选择图标字体文件',
+      multiple: true,
+      title: '添加图标字体文件（可多选）',
       filters: [
         { name: '字体文件', extensions: ['ttf', 'otf', 'woff', 'woff2'] },
         { name: '所有文件', extensions: ['*'] }
       ]
     });
-
-    if (selected) {
-      iconFontFilePath.value = selected;
-      await parseIconFont(selected);
+    const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+    for (const path of paths) {
+      const file = path.split(/[/\\]/).pop() || path;
+      const name = file.replace(/\.[^.]+$/, '') || file;
+      await addIconFontFromPath(path, file, name, false);
     }
   } catch (err) {
-    console.error('选择图标字体文件失败：', err);
-    addInfoMessage(`选择图标字体文件失败: ${JSON.stringify(err)}`, 'error');
+    console.error('添加图标字体文件失败：', err);
+    addInfoMessage(`添加图标字体文件失败: ${JSON.stringify(err)}`, 'error');
   }
 }
 
-async function parseIconFont(filePath) {
+/* 把字形轮廓压缩成整数坐标的 SVG path；坐标单位统一为 1000/em。 */
+function compactGlyphPath(commands) {
+  let d = '';
+  const n = v => Math.round(v);
+  for (const c of commands) {
+    if (c.type === 'M') d += `M${n(c.x)} ${n(c.y)}`;
+    else if (c.type === 'L') d += `L${n(c.x)} ${n(c.y)}`;
+    else if (c.type === 'C') d += `C${n(c.x1)} ${n(c.y1)} ${n(c.x2)} ${n(c.y2)} ${n(c.x)} ${n(c.y)}`;
+    else if (c.type === 'Q') d += `Q${n(c.x1)} ${n(c.y1)} ${n(c.x)} ${n(c.y)}`;
+    else if (c.type === 'Z') d += 'Z';
+  }
+  return d;
+}
+
+/* 直接取字形轮廓，预览用 SVG 画出来，不依赖浏览器 @font-face 能否加载成功。
+ * 少数没有有效轮廓的字形返回 null，模板会回退到字符 + @font-face 显示。 */
+function glyphToSvg(glyph) {
   try {
-    console.log('开始解析图标字体:', filePath);
+    const path = glyph.getPath(0, 0, 1000);
+    if (!path.commands || path.commands.length === 0) return null;
+    const box = path.getBoundingBox();
+    if (!(box.x2 > box.x1 && box.y2 > box.y1)) return null;
+    const padX = (box.x2 - box.x1) * 0.06;
+    const padY = (box.y2 - box.y1) * 0.06;
+    const r = v => Math.round(v * 100) / 100;
+    return {
+      d: compactGlyphPath(path.commands),
+      viewBox: `${r(box.x1 - padX)} ${r(box.y1 - padY)} ${r(box.x2 - box.x1 + padX * 2)} ${r(box.y2 - box.y1 + padY * 2)}`,
+    };
+  } catch {
+    return null;
+  }
+}
 
-    const opentype = await import('opentype.js');
-    const base64Data = await invoke('read_file_as_base64', { path: filePath });
-    const binaryString = atob(base64Data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const arrayBuffer = bytes.buffer;
-    console.log('ArrayBuffer 创建成功，大小:', arrayBuffer.byteLength);
+/* 读取并解析单个图标字体，返回按码点排序、字体内去重的字形列表。
+ * 不再套用原先只针对 FontAwesome 的私用区过滤：新增的 dingbat 字体把图标
+ * 映射在 ASCII / 拉丁扩展区，统一展示字体中所有已映射的可打印字形即可。 */
+async function readIconFontGlyphs(path) {
+  const opentype = await import('opentype.js');
+  const base64Data = await invoke('read_file_as_base64', { path });
+  const binaryString = atob(base64Data);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  const font = opentype.parse(bytes.buffer);
 
-    const font = opentype.parse(arrayBuffer);
-    console.log('字体解析成功，字体名称:', font.names.fontFamily);
-    console.log('字体表数量:', font.tables ? Object.keys(font.tables).length : 0);
+  const seen = new Set();
+  const icons = [];
+  for (const [name, glyph] of Object.entries(font.glyphs.glyphs)) {
+    if (!glyph || glyph.unicode === undefined || glyph.unicode === null) continue;
+    const code = glyph.unicode;
+    // 跳过 .notdef / 控制字符 / 空格、代理项及非法码点
+    if (code <= 0x20 || code > 0x10FFFF ||
+        (code >= 0xD800 && code <= 0xDFFF) || seen.has(code)) continue;
+    // 跳过没有可见轮廓的字形。部分 dingbat 字体把 ASCII 码点映射成空占位字形，
+    // 它们按码点排在最前面，会让预览首屏出现大片空白。
+    const svg = glyphToSvg(glyph);
+    if (!svg) continue;
+    seen.add(code);
+    icons.push({
+      code,
+      char: String.fromCodePoint(code),
+      name: String(glyph.name || name),
+      svg,
+    });
+  }
+  icons.sort((a, b) => a.code - b.code);
 
-    // 移除旧的字体样式
-    const oldStyle = document.getElementById('icon-font-style');
-    if (oldStyle) {
-      oldStyle.remove();
-    }
-    if (iconFontUrl.value) {
-      URL.revokeObjectURL(iconFontUrl.value);
-    }
+  const names = font.names?.fontFamily || {};
+  const familyName = typeof names === 'string' ? names : (names.en || Object.values(names)[0] || '');
+  return { icons, bytes, familyName };
+}
 
-    // 创建字体 URL 用于显示
-    const fontBlob = new Blob([bytes], { type: 'font/ttf' });
-    const fontUrl = URL.createObjectURL(fontBlob);
-    iconFontUrl.value = fontUrl;
+function fontFaceFormat(file) {
+  if (/\.otf$/i.test(file)) return { format: 'opentype', mime: 'font/otf' };
+  if (/\.woff2$/i.test(file)) return { format: 'woff2', mime: 'font/woff2' };
+  if (/\.woff$/i.test(file)) return { format: 'woff', mime: 'font/woff' };
+  return { format: 'truetype', mime: 'font/ttf' };
+}
 
-    // 动态创建 @font-face 样式
-    const fontFaceStyle = document.createElement('style');
-    fontFaceStyle.id = 'icon-font-style';
-    fontFaceStyle.textContent = `
-      @font-face {
-        font-family: 'IconFont';
-        src: url('${fontUrl}') format('truetype');
+/* 每个字体一个独立的 @font-face / family，作为轮廓渲染的兜底 */
+function iconFontFaceRule(f) {
+  return `@font-face {
+        font-family: '${f.family}';
+        src: url('${f.url}') format('${f.format}');
         font-weight: normal;
         font-style: normal;
         font-display: swap;
-      }
-      .icon-char {
-        font-family: 'IconFont', 'Font Awesome 6 Free', 'Font Awesome 5 Free', 'FontAwesome', sans-serif !important;
-      }
-    `;
-    document.head.appendChild(fontFaceStyle);
+      }`;
+}
 
-    // 等待字体加载
-    await document.fonts.load('16px IconFont');
-    console.log('字体加载完成');
+function warmIconFont(f) {
+  // 不阻塞「添加」流程，加载失败也不影响 SVG 轮廓预览
+  try {
+    document.fonts.load(`16px ${f.family}`).catch(() => {});
+  } catch { /* 忽略单个字体加载失败 */ }
+}
 
-    const icons = [];
-    const glyphNames = Object.keys(font.glyphs.glyphs);
-    console.log('字形数量:', glyphNames.length);
+/* 新增字体时只追加一条规则，避免整体重建让上千个预览元素重新排版 */
+function appendIconFontStyle(f) {
+  let style = document.getElementById('icon-font-style');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'icon-font-style';
+    document.head.appendChild(style);
+  }
+  style.textContent += iconFontFaceRule(f) + '\n';
+  warmIconFont(f);
+}
 
-    glyphNames.forEach(name => {
-      const glyph = font.glyphs.glyphs[name];
-      if (glyph && glyph.unicode !== undefined && glyph.unicode !== null) {
-        const unicode = glyph.unicode;
-        // Font Awesome 图标通常在私用区 (Private Use Area)
-        // 基本多文种平面 (BMP): U+E000-U+F8FF
-        // 第一辅助平面: U+F0000-U+FFFFD (Font Awesome 6+)
-        // 第二辅助平面: U+100000-U+10FFFD
-        // Font Awesome 7/8 常用范围
-        if ((unicode >= 0xE000 && unicode <= 0xF8FF) ||
-            (unicode >= 0xF000 && unicode <= 0xF2FF) ||
-            (unicode >= 0xF400 && unicode <= 0xF4FF) ||
-            (unicode >= 0x2000 && unicode <= 0x2BFF) ||
-            (unicode >= 0x1F000 && unicode <= 0x1FFFF) ||  // 第一辅助平面
-            (unicode >= 0xF0000 && unicode <= 0xFFFFD) ||   // 私用区补充 A
-            (unicode >= 0x100000 && unicode <= 0x10FFFD)) { // 私用区补充 B
-          icons.push({
-            code: unicode,
-            char: String.fromCodePoint(unicode),
-            name: name
-          });
-        }
-      }
-    });
+/* 移除字体后用剩余字体重建一次 */
+function rebuildIconFontStyles() {
+  const oldStyle = document.getElementById('icon-font-style');
+  if (oldStyle) oldStyle.remove();
+  if (iconFonts.value.length === 0) return;
 
-    // 如果没有找到图标，尝试包含所有非零 unicode 的字形
+  const style = document.createElement('style');
+  style.id = 'icon-font-style';
+  style.textContent = iconFonts.value.map(iconFontFaceRule).join('\n');
+  document.head.appendChild(style);
+  for (const f of iconFonts.value) warmIconFont(f);
+}
+
+async function addIconFontFromPath(path, file, name, builtin, silent = false) {
+  const key = path.toLowerCase();
+  if (iconFonts.value.some(f =>
+    f.path.toLowerCase() === key || (f.builtin && builtin && f.file === file)
+  )) {
+    if (!silent) addInfoMessage(`「${name}」已添加，未重复追加`, 'info');
+    return;
+  }
+
+  try {
+    const { icons, bytes, familyName } = await readIconFontGlyphs(path);
     if (icons.length === 0) {
-      console.log('在标准范围内未找到图标，尝试包含所有字形...');
-      glyphNames.forEach(name => {
-        const glyph = font.glyphs.glyphs[name];
-        if (glyph && glyph.unicode !== undefined && glyph.unicode !== null && glyph.unicode > 0) {
-          icons.push({
-            code: glyph.unicode,
-            char: glyph.unicode > 0xFFFF ? String.fromCodePoint(glyph.unicode) : String.fromCharCode(glyph.unicode),
-            name: name
-          });
-        }
-      });
+      if (!silent) addInfoMessage(`「${name}」中没有可用的图标字形`, 'error');
+      return;
     }
+    const id = nextIconFontId++;
+    const { format, mime } = fontFaceFormat(file);
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const displayName = familyName || name;
+    const fontEntry = {
+      id,
+      name: displayName,
+      file,
+      path,
+      builtin,
+      family: `IconFont_${id}`,
+      url,
+      format,
+      iconCount: icons.length,
+    };
 
-    icons.sort((a, b) => a.code - b.code);
-    console.log('找到图标数量:', icons.length);
+    iconFonts.value.push(fontEntry);
+    // 追加而非替换：之前添加的字体、已勾选的图标都保留。
+    // 轮廓数据不会变化，markRaw 避免上千个大对象被逐层响应式代理拖慢渲染。
+    iconList.value.push(...icons.map(icon => markRaw({
+      ...icon,
+      key: `${id}:${icon.code}`,
+      fontId: id,
+      family: fontEntry.family,
+      fontName: displayName,
+    })));
 
-    // 显示前10个图标的详细信息用于调试
-    if (icons.length > 0) {
-      console.log('前10个图标:', icons.slice(0, 10));
+    appendIconFontStyle(fontEntry);
+    persistBuiltinIconFonts();
+    if (!silent) {
+      addInfoMessage(`已添加「${displayName}」：追加 ${icons.length} 个图标到预览`, 'info');
     }
-
-    iconList.value = icons;
-    selectedIcons.value = [];
   } catch (err) {
-    console.error('解析图标字体失败：', err);
-    console.error('错误详情:', err.message, err.stack);
-    iconList.value = [];
-    selectedIcons.value = [];
+    console.error('解析图标字体失败：', path, err);
+    if (!silent) {
+      addInfoMessage(`添加「${name}」失败：${err?.message || String(err)}`, 'error');
+    }
   }
 }
 
+function removeIconFont(id) {
+  const index = iconFonts.value.findIndex(f => f.id === id);
+  if (index < 0) return;
+  const [font] = iconFonts.value.splice(index, 1);
+  iconList.value = iconList.value.filter(icon => icon.fontId !== id);
+  selectedIcons.value = selectedIcons.value.filter(icon => icon.fontId !== id);
+  if (font.url) URL.revokeObjectURL(font.url);
+  rebuildIconFontStyles();
+  persistBuiltinIconFonts();
+  addInfoMessage(`已移除「${font.name}」及其 ${font.iconCount} 个图标`, 'info');
+}
+
+function clearIconFonts() {
+  for (const font of iconFonts.value) {
+    if (font.url) URL.revokeObjectURL(font.url);
+  }
+  iconFonts.value = [];
+  iconList.value = [];
+  selectedIcons.value = [];
+  rebuildIconFontStyles();
+  persistBuiltinIconFonts();
+  addInfoMessage('已清空全部图标字体', 'info');
+}
+
+/* 预览按来源字体分组：每次「添加」都在末尾追加一个分组，可单独折叠 */
+const iconsByFont = computed(() => {
+  const map = new Map();
+  for (const icon of iconList.value) {
+    if (!map.has(icon.fontId)) map.set(icon.fontId, []);
+    map.get(icon.fontId).push(icon);
+  }
+  return map;
+});
+const iconsOfFont = id => iconsByFont.value.get(id) || [];
+
+const collapsedFontIds = ref([]);
+function isCollapsed(id) {
+  return collapsedFontIds.value.includes(id);
+}
+function toggleFontGroup(id) {
+  const index = collapsedFontIds.value.indexOf(id);
+  if (index >= 0) collapsedFontIds.value.splice(index, 1);
+  else collapsedFontIds.value.push(id);
+}
+
+function selectFontIcons(id) {
+  const keys = new Set(selectedIcons.value.map(i => i.key));
+  for (const icon of iconsOfFont(id)) {
+    if (!keys.has(icon.key)) selectedIcons.value.push(icon);
+  }
+}
+
+function deselectFontIcons(id) {
+  selectedIcons.value = selectedIcons.value.filter(i => i.fontId !== id);
+}
+
+/* 同一码点可能同时存在于多个图标字体，选中状态用 (字体, 码点) 唯一标识。
+ * 用 Set 缓存，避免「全选」上千个图标时预览逐项线性查找 */
+const selectedIconKeys = computed(() => new Set(selectedIcons.value.map(i => i.key)));
+function isIconSelected(icon) {
+  return selectedIconKeys.value.has(icon.key);
+}
+
 function toggleIconSelection(icon) {
-  const index = selectedIcons.value.findIndex(i => i.code === icon.code);
+  const index = selectedIcons.value.findIndex(i => i.key === icon.key);
   if (index > -1) {
     selectedIcons.value.splice(index, 1);
   } else {
@@ -823,6 +1206,19 @@ function removeCharRange(index) {
   charRanges.value.splice(index, 1);
 }
 
+/* 把 [start,end] 中被 excluded 占用的码点挖掉，返回剩余的连续子区间 */
+function subtractCodesFromRange(start, end, excluded) {
+  const holes = [...excluded].filter(code => code >= start && code <= end).sort((a, b) => a - b);
+  const remaining = [];
+  let cursor = start;
+  for (const hole of holes) {
+    if (hole > cursor) remaining.push([cursor, hole - 1]);
+    cursor = hole + 1;
+  }
+  if (cursor <= end) remaining.push([cursor, end]);
+  return remaining;
+}
+
 async function convertFont() {
   if (!canConvert.value || isConverting.value) return;
 
@@ -832,7 +1228,50 @@ async function convertFont() {
     // 直接使用当前目录中的sgl_font_conv.exe文件
     // 测试使用：const exePath = '../src/sgl_font_conv/sgl_font_conv.exe';
     const exePath = 'sgl_font_conv.exe';
+    let commandStr = exePath; // 提前声明，异常时也能打印已拼出的命令
     console.log('使用的sgl_font_conv.exe路径:', exePath);
+
+    // 勾选的图标按来源字体分组：C 工具支持重复 --font，每组跟一组 --symbols
+    const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
+    const iconGroups = new Map();
+    const fontById = new Map(iconFonts.value.map(f => [f.id, f]));
+    for (const icon of sortedIcons) {
+      const font = fontById.get(icon.fontId);
+      if (!font) continue;
+      if (!iconGroups.has(font.path)) iconGroups.set(font.path, []);
+      iconGroups.get(font.path).push(icon);
+    }
+
+    // 明确勾选的图标优先于主字体的批量范围：把这些码点从主字体范围里挖掉，
+    // 否则 C 工具合并时会保留先出现的主字体字形（很多 dingbat 图标正好在 ASCII 区）。
+    const iconCodeSet = new Set(sortedIcons.map(i => i.code));
+    const mainRanges = [];
+    for (const range of charRanges.value) {
+      mainRanges.push(...subtractCodesFromRange(range.start, range.end, iconCodeSet));
+    }
+    const mainSymbols = Array.from(customChars.value)
+      .map(c => c.codePointAt(0))
+      .filter(code => !iconCodeSet.has(code))
+      .sort((a, b) => a - b);
+    const hasMainFontContent = !!fontFilePath.value && (mainRanges.length > 0 || mainSymbols.length > 0);
+
+    let duplicateCount = 0;
+    const codeOwners = new Set();
+    for (const icons of iconGroups.values()) {
+      for (const icon of icons) {
+        if (codeOwners.has(icon.code)) duplicateCount++;
+        else codeOwners.add(icon.code);
+      }
+    }
+    if (duplicateCount > 0) {
+      addInfoMessage(`注意：不同图标字体间有 ${duplicateCount} 个重复码点，取模时保留先添加字体的字形`, 'info');
+    }
+    const excluded = charRanges.value.reduce((n, r) => n + (r.end - r.start + 1), 0)
+      - mainRanges.reduce((n, r) => n + (r[1] - r[0] + 1), 0)
+      + (Array.from(customChars.value).length - mainSymbols.length);
+    if (excluded > 0) {
+      addInfoMessage(`已为主字体排除 ${excluded} 个与图标冲突的码点，图标字形优先生效`, 'info');
+    }
 
     const args = [
       '--size', fontSize.value.toString(),
@@ -840,30 +1279,24 @@ async function convertFont() {
     ];
 
     // 检查是否需要添加字体文件
-    const hasMainFontContent = charRanges.value.length > 0 || customChars.value.trim() !== '';
     if (hasMainFontContent) {
       args.push('--font', fontFilePath.value);
-      // 添加主字体的范围
-      for (const range of charRanges.value) {
-        args.push('--range', `0x${range.start.toString(16)}-0x${range.end.toString(16)}`);
+      // 添加主字体的范围（已剔除图标占用的码点）
+      for (const [start, end] of mainRanges) {
+        args.push('--range', `0x${start.toString(16)}-0x${end.toString(16)}`);
       }
-      // 添加主字体的自定义字符
-      if (customChars.value) {
-        // 对自定义字符按Unicode码点排序
-        const sortedChars = customChars.value.split('').sort((a, b) => a.codePointAt(0) - b.codePointAt(0)).join('');
-        args.push('--symbols', sortedChars);
+      // 添加主字体的自定义字符（按完整码点排序，超 BMP 字符不会被拆成代理项）
+      if (mainSymbols.length > 0) {
+        args.push('--symbols', mainSymbols.map(code => String.fromCodePoint(code)).join(''));
       }
     }
 
-    // 检查是否需要添加图标字体文件
-    if (iconFontFilePath.value && selectedIcons.value.length > 0) {
-      args.push('--font', iconFontFilePath.value);
-      // 添加图标字体的符号（使用--symbols）
-      // 对图标按Unicode码点排序
-      const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
-      const iconSymbols = sortedIcons.map(icon => icon.char).join('');
-      if (iconSymbols) {
-        args.push('--symbols', iconSymbols);
+    // 每个图标字体单独一组 --font + --symbols，符号沿用该字体自己的字形
+    for (const [fontPath, icons] of iconGroups) {
+      const symbols = icons.map(icon => icon.char).join('');
+      if (symbols) {
+        args.push('--font', fontPath);
+        args.push('--symbols', symbols);
       }
     }
 
@@ -903,7 +1336,7 @@ async function convertFont() {
     args.push('--output', outputFullPath);
 
     // 构建完整的命令字符串用于打印（--参数不加引号，参数值使用单引号）
-    let commandStr = exePath;
+    commandStr = exePath;
     for (let i = 0; i < args.length; i++) {
       if (args[i].startsWith('--')) {
         commandStr += ` ${args[i]}`;
@@ -929,31 +1362,17 @@ async function convertFont() {
         const { readTextFile, writeTextFile } = await import('@tauri-apps/plugin-fs');
         let cFileContent = await readTextFile(outputFullPath);
 
-        // 生成宏定义
-        const sortedIcons = [...selectedIcons.value].sort((a, b) => a.code - b.code);
+        // 生成宏定义：多个字体可能含同一码点，按码点去重避免 C 里重复 #define。
+        // TextEncoder 直接按 UTF-8 编码整个码点，超 BMP 字符不会拆成代理项对。
         let macroDefinitions = '\n\n// Icon macros\n';
-
+        const seenCodes = new Set();
         for (const icon of sortedIcons) {
+          if (seenCodes.has(icon.code)) continue;
+          seenCodes.add(icon.code);
           const macroName = `SGL_ICON_${icon.code.toString(16).toUpperCase()}`;
-          const charBytes = icon.char.split('').map(c => {
-            const code = c.charCodeAt(0);
-            if (code < 128) {
-              return `\\x${code.toString(16).padStart(2, '0')}`;
-            } else {
-              // UTF-8编码
-              const utf8Bytes = [];
-              if (code < 0x800) {
-                utf8Bytes.push(0xC0 | (code >> 6));
-                utf8Bytes.push(0x80 | (code & 0x3F));
-              } else {
-                utf8Bytes.push(0xE0 | (code >> 12));
-                utf8Bytes.push(0x80 | ((code >> 6) & 0x3F));
-                utf8Bytes.push(0x80 | (code & 0x3F));
-              }
-              return utf8Bytes.map(b => `\\x${b.toString(16).padStart(2, '0')}`).join('');
-            }
-          }).join('');
-
+          const charBytes = Array.from(new TextEncoder().encode(icon.char))
+            .map(b => `\\x${b.toString(16).padStart(2, '0')}`)
+            .join('');
           macroDefinitions += `#define ${macroName} "${charBytes}"\n`;
         }
 
@@ -1214,6 +1633,63 @@ h2 {
   color: #999;
   font-size: 12px;
   padding: 20px 0;
+}
+
+/* 已添加的图标字体：可逐个移除，移除后预览中该字体的图标一起消失 */
+.added-font-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.added-font-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 5px 10px;
+  background: #e8f4ff;
+  color: #5a86ff;
+  border-radius: 16px;
+  font-size: 12px;
+}
+
+.added-font-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.added-font-count {
+  flex: none;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.clear-fonts-btn {
+  padding: 4px 10px;
+  border: 1px solid #ff7875;
+  border-radius: 14px;
+  background: transparent;
+  color: #ff7875;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.clear-fonts-btn:hover {
+  background: #ff7875;
+  color: white;
+}
+
+html.dark .added-font-tag {
+  background: #2a3550;
+  color: #8fb4ff;
+}
+
+html.dark .clear-fonts-btn {
+  border-color: #ff7875;
+  color: #ff7875;
 }
 
 .file-path {
@@ -1784,17 +2260,156 @@ html.dark .deselect-all-btn:hover {
   color: white;
 }
 
-/* 图标预览样式 */
-.icon-preview-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-  gap: 6px;
-  max-height: calc(4 * (50px + 6px) + 16px);
-  overflow-y: auto;
-  padding: 8px;
+/* 预览配色工具条 */
+.preview-color-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
   border: 1px solid #e8e8e8;
   border-radius: 6px;
   background: #fafafa;
+  font-size: 12px;
+}
+
+.preview-color-title {
+  font-weight: 600;
+  color: #555;
+}
+
+.preview-color-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #666;
+  cursor: pointer;
+}
+
+.preview-color-field input[type='color'] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.preview-color-presets {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.preview-color-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preview-color-preset:hover {
+  border-color: #5a86ff;
+  color: #5a86ff;
+}
+
+.preview-color-preset.active {
+  border-color: #5a86ff;
+  background: #eef3ff;
+  color: #3358cc;
+}
+
+.preset-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 3px;
+  font: 700 10px/1 sans-serif;
+}
+
+.preview-color-hint {
+  margin-left: auto;
+  color: #aaa;
+  font-size: 11px;
+}
+
+/* 图标预览样式 */
+.icon-font-group {
+  margin-bottom: 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.icon-font-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  background: #f0f4ff;
+  border-bottom: 1px solid #e8e8e8;
+  font-size: 12px;
+}
+
+.icon-font-group-name {
+  font-weight: 600;
+  color: #3457c5;
+  max-width: 260px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.icon-font-group-count {
+  color: #7a8699;
+  flex: 1;
+  min-width: 120px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-toggle-btn {
+  padding: 3px 10px;
+  border: 1px solid #b9c6de;
+  border-radius: 4px;
+  background: white;
+  color: #5a6b8c;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.group-toggle-btn:hover {
+  border-color: #5a86ff;
+  color: #5a86ff;
+}
+
+.icon-preview-container {
+  /* 默认跟随主题，工具条选择颜色后用内联变量覆盖 */
+  --icon-preview-fg: #333;
+  --icon-preview-bg: #fafafa;
+  --icon-preview-item-bg: #fff;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  gap: 6px;
+  max-height: calc(6 * (50px + 6px) + 16px);
+  overflow-y: auto;
+  padding: 8px;
+  border: none;
+  border-radius: 0;
+  background: var(--icon-preview-bg);
 }
 
 .icon-item {
@@ -1805,10 +2420,13 @@ html.dark .deselect-all-btn:hover {
   padding: 6px 4px;
   border: 1px solid #ddd;
   border-radius: 4px;
-  background: white;
+  background: var(--icon-preview-item-bg, white);
   cursor: pointer;
   transition: all 0.2s ease;
   height: 50px;
+  /* 几千个图标时长列表跳过视口外渲染，避免界面卡住 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 50px;
 }
 
 .icon-item:hover {
@@ -1828,6 +2446,23 @@ html.dark .deselect-all-btn:hover {
   font-size: 20px;
   margin-bottom: 2px;
   font-family: 'Segoe UI Symbol', 'Arial Unicode MS', sans-serif;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 预览直接画字形轮廓，颜色由预览配色工具条控制 */
+.icon-glyph {
+  width: 26px;
+  height: 26px;
+  display: block;
+  fill: var(--icon-preview-fg, #333);
+}
+
+/* 没有轮廓、回退到 @font-face 文本渲染的字形同样跟随配色 */
+.icon-char > span {
+  color: var(--icon-preview-fg, #333);
 }
 
 .icon-code {
@@ -1996,12 +2631,16 @@ html.dark .msg-content {
 }
 
 html.dark .icon-preview-container {
-  background: #1a1d2b;
+  --icon-preview-fg: #e0e0e0;
+  --icon-preview-bg: #1a1d2b;
+  --icon-preview-item-bg: #252a3a;
+  background: var(--icon-preview-bg);
   border-color: #3a3f55;
 }
 
 html.dark .icon-item {
-  background: #252a3a;
+  /* 自定义预览背景时格子跟着变，不能用硬编码色盖掉变量 */
+  background: var(--icon-preview-item-bg, #252a3a);
   border-color: #3a3f55;
 }
 
@@ -2013,6 +2652,59 @@ html.dark .icon-item:hover {
 html.dark .icon-item.selected {
   background: #1a2e3a;
   border-color: #6699ff;
+}
+
+html.dark .preview-color-bar {
+  background: #1f2331;
+  border-color: #3a3f55;
+}
+
+html.dark .preview-color-title,
+html.dark .preview-color-field {
+  color: #b9c0d4;
+}
+
+html.dark .preview-color-field input[type='color'] {
+  border-color: #4a5068;
+}
+
+html.dark .preview-color-preset {
+  background: #252a3a;
+  border-color: #3a3f55;
+  color: #b9c0d4;
+}
+
+html.dark .preview-color-preset.active {
+  background: #2a3550;
+  border-color: #6699ff;
+  color: #9fc0ff;
+}
+
+html.dark .preview-color-hint {
+  color: #7d849b;
+}
+
+html.dark .icon-font-group {
+  border-color: #3a3f55;
+}
+
+html.dark .icon-font-group-header {
+  background: #252a3a;
+  border-bottom-color: #3a3f55;
+}
+
+html.dark .icon-font-group-name {
+  color: #8fb4ff;
+}
+
+html.dark .icon-font-group-count {
+  color: #a0a6b8;
+}
+
+html.dark .group-toggle-btn {
+  background: #2f354a;
+  border-color: #3a3f55;
+  color: #c0c8dc;
 }
 
 html.dark .icon-code {

@@ -25,6 +25,24 @@
   "bundle": {
     "active": false,
     "targets": [],
+    "resources": [
+      "binaries/FontAwesome.otf",
+      "binaries/Blockheads United.ttf",
+      "binaries/CatgirlSystemFont-Regular.otf",
+      "binaries/Floralia Dingbat.ttf",
+      "binaries/HazardSigns.ttf",
+      "binaries/Herlora Floral Dingbat.ttf",
+      "binaries/MaterialIcons-Regular.ttf",
+      "binaries/MaterialIconsOutlined-Regular.otf",
+      "binaries/MaterialIconsRound-Regular.otf",
+      "binaries/MaterialIconsSharp-Regular.otf",
+      "binaries/MaterialIconsTwoTone-Regular.otf",
+      "binaries/Numberpile.otf",
+      "binaries/Oil Crisis A.otf",
+      "binaries/Oil Crisis B.otf",
+      "binaries/Type Icons.ttf",
+      "binaries/icon-works-webfont.ttf"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/32x32.ico"
