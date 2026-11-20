@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- 图标转换：四个小 app 图标组成图标集，呼应「多张图片合并为一个二维数组」 -->
+  <rect x="48" y="48" width="196" height="196" rx="44" fill="#2F6BFF" />
+  <path d="M146 76 L162 130 L216 146 L162 162 L146 216 L130 162 L76 146 L130 130 Z" fill="#FFFFFF" />
+  <rect x="268" y="48" width="196" height="196" rx="44" fill="#FF7A3D" />
+  <circle cx="366" cy="146" r="48" fill="#FFFFFF" />
+  <rect x="48" y="268" width="196" height="196" rx="44" fill="#7C5CFF" />
+  <rect x="98" y="318" width="96" height="96" rx="18" fill="#FFFFFF" />
+  <rect x="268" y="268" width="196" height="196" rx="44" fill="#1D9E75" />
+  <path d="M366 306 L420 402 L312 402 Z" fill="#FFFFFF" />
+</svg>
