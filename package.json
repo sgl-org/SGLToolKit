@@ -8,6 +8,12 @@
     "build": "vite build",
     "build:csidecar": "cd src\\sgl_font_conv\\source && make && copy /Y sgl_font_conv.exe ..\\..\\..\\src-tauri\\binaries\\sgl_font_conv-x86_64-pc-windows-msvc.exe",
     "test:image-conversion": "node tests/imageConversion.test.js",
+    "test:icon-pixmap": "node tests/iconPixmap.test.js",
+    "test:icon-file": "node tests/iconFile.test.js",
+    "test:image-resize": "node tests/imageResize.test.js",
+    "test:icon-convert": "node tests/iconPixmap.test.js && node tests/iconFile.test.js && node tests/imageResize.test.js",
+    "build:icon-cli": "make -C tools/sgl_icon_conv_cli/source",
+    "test:icon-cli": "node tools/sgl_icon_conv_cli/tests/run.js",
     "preview": "vite preview",
     "tauri": "tauri"
   },

@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SGLToolKit V2.0.3",
+        "title": "SGLToolKit V2.0.4",
         "width": 1240,
         "height": 900
       }
@@ -41,7 +41,8 @@
       "binaries/Oil Crisis A.otf",
       "binaries/Oil Crisis B.otf",
       "binaries/Type Icons.ttf",
-      "binaries/icon-works-webfont.ttf"
+      "binaries/icon-works-webfont.ttf",
+      "binaries/file-icons.ttf"
     ],
     "icon": [
       "icons/32x32.png",

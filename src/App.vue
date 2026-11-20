@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 // 本地图标
 import iconFont from './icons/font.png'
 import iconImage from './icons/image.png'
+import iconIcon from './icons/icon.png'
 import iconGif from './icons/gif.png'
 import iconVideo from './icons/video.png'
 import iconAbout from './icons/about.png'
@@ -17,6 +18,7 @@ const shakeIndex = ref(null)
 const menus = ref([
   { path: '/font-convert', icon: iconFont, name: '字体转换' },
   { path: '/image-convert', icon: iconImage, name: '图片转换' },
+  { path: '/icon-convert', icon: iconIcon, name: '图标转换' },
   { path: '/gif-to-image', icon: iconGif, name: 'GIF转换' },
   { path: '/video-convert', icon: iconVideo, name: '视频转换' },
   { path: '/about-info', icon: iconAbout, name: '关于' },
@@ -32,6 +34,13 @@ onMounted(() => {
   }
   document.documentElement.classList.toggle('dark', isDark.value)
 })
+
+// 刷新页面 / 直接输入地址时保持当前菜单高亮（初始导航是异步的，用 watch 持续同步）
+watch(() => router.currentRoute.value.path, (path) => {
+  if (menus.value.some((item) => item.path === path)) {
+    activeMenu.value = path
+  }
+}, { immediate: true })
 
 // 菜单点击
 function switchMenu(path, index) {
