@@ -27,6 +27,7 @@ static BUILTIN_ICON_FONTS: &[(&str, &[u8])] = &[
     ("Oil Crisis B.otf", include_bytes!("../binaries/Oil Crisis B.otf")),
     ("Type Icons.ttf", include_bytes!("../binaries/Type Icons.ttf")),
     ("icon-works-webfont.ttf", include_bytes!("../binaries/icon-works-webfont.ttf")),
+    ("file-icons.ttf", include_bytes!("../binaries/file-icons.ttf")),
 ];
 
 // 提取嵌入的 exe 到临时目录，返回 exe 路径
