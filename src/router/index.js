@@ -4,6 +4,7 @@ import ImageConvert from '../components/ImageConvert.vue'
 import IconConvert from '../components/IconConvert.vue'
 import GifToImage from '../components/GifToImage.vue'
 import VideoConvert from '../components/VideoConvert.vue'
+import Designer from '../components/Designer.vue'
 import AboutInfo from '../components/AboutInfo.vue'
 
 const routes = [
@@ -13,6 +14,7 @@ const routes = [
   { path: '/icon-convert', component: IconConvert },
   { path: '/gif-to-image', component: GifToImage },
   { path: '/video-convert', component: VideoConvert },
+  { path: '/designer', component: Designer },
   { path: '/about-info', component: AboutInfo },
 ]
 

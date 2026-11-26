@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 // 本地图标
@@ -8,10 +8,12 @@ import iconImage from './icons/image.png'
 import iconIcon from './icons/icon.png'
 import iconGif from './icons/gif.png'
 import iconVideo from './icons/video.png'
+import iconDesigner from './icons/designer.png'
 import iconAbout from './icons/about.png'
 
 const router = useRouter()
 const activeMenu = ref('/font-convert')
+const isDesigner = computed(() => router.currentRoute.value.path === '/designer')
 const isDark = ref(true)
 const shakeIndex = ref(null)
 
@@ -21,6 +23,7 @@ const menus = ref([
   { path: '/icon-convert', icon: iconIcon, name: '图标转换' },
   { path: '/gif-to-image', icon: iconGif, name: 'GIF转换' },
   { path: '/video-convert', icon: iconVideo, name: '视频转换' },
+  { path: '/designer', icon: iconDesigner, name: '设计器' },
   { path: '/about-info', icon: iconAbout, name: '关于' },
 ])
 
@@ -90,7 +93,7 @@ function toggleTheme() {
       </div>
     </div>
 
-    <div class="content">
+    <div class="content" :class="{ 'designer-mode': isDesigner }">
 
       <router-view />
     </div>
@@ -281,6 +284,16 @@ input:checked ~ .thumb {
   padding: 0 !important;
   box-shadow: none !important;
   margin-top: 40px;
+}
+
+/* 设计器铺满窗口，与界面无间距 */
+.content.designer-mode {
+  padding: 0;
+  overflow: hidden;
+}
+.content.designer-mode :deep(.page-container) {
+  margin-top: 0 !important;
+  height: 100%;
 }
 </style>
 

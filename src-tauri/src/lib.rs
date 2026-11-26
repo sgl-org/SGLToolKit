@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize};
+use tauri::Emitter;
 
 // 将 sgl_font_conv.exe 嵌入到主程序中（编译时嵌入到二进制中）
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
@@ -717,6 +718,576 @@ async fn zip_files(files: Vec<ZipFile>, output_path: String) -> std::collections
     result
 }
 
+// ---------- UI 设计器：编译并运行 SGL + SDL2 仿真 ----------
+
+// 设计器仿真进程，同一时间只保留一个窗口
+static DESIGNER_SIM: std::sync::Mutex<Option<std::process::Child>> =
+    std::sync::Mutex::new(None);
+
+fn designer_repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+/// 设计器仿真需要的 SGL 组件源码（只挑用到的，避免编译全部组件）
+fn designer_widget_sources() -> Vec<&'static str> {
+    vec![
+        "widgets/label/sgl_label.c",
+        "widgets/button/sgl_button.c",
+        "widgets/rect/sgl_rect.c",
+        "widgets/line/sgl_line.c",
+        "widgets/circle/sgl_circle.c",
+        "widgets/arc/sgl_arc.c",
+        "widgets/slider/sgl_slider.c",
+        "widgets/progress/sgl_progress.c",
+        "widgets/bar/sgl_bar.c",
+        "widgets/switch/sgl_switch.c",
+        "widgets/checkbox/sgl_checkbox.c",
+        "widgets/led/sgl_led.c",
+        "widgets/textbox/sgl_textbox.c",
+        "widgets/qrcode/qrcode.c",
+        "widgets/qrcode/sgl_qrcode.c",
+    ]
+}
+
+fn designer_collect_sources(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut sources: Vec<std::path::PathBuf> = Vec::new();
+    let mut push_dir = |dir: std::path::PathBuf, skip: &[&str]| {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            let mut list: Vec<std::path::PathBuf> = entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().map(|e| e == "c").unwrap_or(false))
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| !skip.contains(&n))
+                        .unwrap_or(true)
+                })
+                .collect();
+            list.sort();
+            sources.extend(list);
+        }
+    };
+
+    push_dir(root.join("sgl_src").join("core"), &["sgl_fs.c"]);
+    push_dir(root.join("sgl_src").join("draw"), &["sgl_draw_slate.c"]);
+    push_dir(root.join("sgl_src").join("fonts"), &[]);
+    sources.push(root.join("sgl_src").join("mm").join("lwmem").join("lwmem.c"));
+    sources.push(root.join("sgl_src").join("mm").join("lwmem").join("sgl_mm.c"));
+    for rel in designer_widget_sources() {
+        sources.push(root.join("sgl_src").join(rel));
+    }
+    sources.push(root.join("sgl_port").join("designer").join("designer_main.c"));
+    sources
+}
+
+fn designer_object_name(source: &std::path::Path, forced: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    if !forced.is_empty() {
+        return format!("{}.o", forced);
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.to_string_lossy().to_ascii_lowercase().hash(&mut hasher);
+    format!("{:016x}.o", hasher.finish())
+}
+
+fn designer_needs_rebuild(source: &std::path::Path, object: &std::path::Path) -> bool {
+    let src_time = std::fs::metadata(source).and_then(|m| m.modified()).ok();
+    let obj_time = std::fs::metadata(object).and_then(|m| m.modified()).ok();
+    match (src_time, obj_time) {
+        (Some(s), Some(o)) => s > o,
+        _ => true,
+    }
+}
+
+// 设计器编译日志：实时推送到前端「编译」标签页
+fn designer_log(app: &tauri::AppHandle, text: impl Into<String>) {
+    let _ = app.emit("designer-build-log", text.into());
+}
+
+fn designer_run_gcc(args: &[String], app: &tauri::AppHandle) -> Result<(), String> {
+    let mut command = std::process::Command::new("gcc");
+    command.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let output = command
+        .output()
+        .map_err(|e| format!("无法启动 gcc，请确认已安装 MinGW 并加入 PATH：{}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for line in stdout.lines().chain(stderr.lines()) {
+        if !line.trim().is_empty() {
+            designer_log(app, line.to_string());
+        }
+    }
+    if output.status.success() {
+        return Ok(());
+    }
+    let mut text = format!("{}\n{}", stdout, stderr);
+    if text.chars().count() > 4000 {
+        text = text.chars().take(4000).collect();
+    }
+    Err(text)
+}
+
+fn designer_compile(
+    source: &std::path::Path,
+    object: &std::path::Path,
+    includes: &[String],
+    defines: &[String],
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    let mut args: Vec<String> = vec![
+        "-c".into(),
+        "-O1".into(),
+        "-w".into(),
+        "-DSDL_MAIN_HANDLED".into(),
+    ];
+    args.extend(defines.iter().cloned());
+    args.extend(includes.iter().cloned());
+    args.push(source.to_string_lossy().into_owned());
+    args.push("-o".into());
+    args.push(object.to_string_lossy().into_owned());
+    args.push("-static-libgcc".into());
+    designer_run_gcc(&args, app).map_err(|e| {
+        let name = source.file_name().and_then(|n| n.to_str()).unwrap_or("source");
+        let message = format!("编译失败: {}\n{}", name, e);
+        designer_log(app, format!("[ERROR] {}", message));
+        message
+    })
+}
+
+fn designer_kill_running() {
+    if let Ok(mut guard) = DESIGNER_SIM.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// 设计器使用到的图标字体来源：字体文件 + 需要保留的码点
+#[derive(serde::Deserialize, Clone)]
+struct DesignerIconSource {
+    path: String,
+    codes: Vec<u32>,
+}
+
+/// 同一字号的图标合并成一个字体文件
+#[derive(serde::Deserialize, Clone)]
+struct DesignerIconGroup {
+    size: u32,
+    #[serde(default)]
+    bpp: Option<u32>,
+    sources: Vec<DesignerIconSource>,
+}
+
+/// 界面实际使用的本地字体及字符子集
+#[derive(serde::Deserialize, Clone)]
+struct DesignerUiFontGroup {
+    symbol: String,
+    path: String,
+    size: u32,
+    chars: Vec<u32>,
+}
+
+/// 调用内嵌的 sgl_font_conv，把同一字号下的多个图标字体合并为一个 C 字体文件。
+fn designer_make_icon_fonts(
+    groups: &[DesignerIconGroup],
+    out_dir: &std::path::Path,
+    app: Option<&tauri::AppHandle>,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    if groups.is_empty() {
+        return Ok(Vec::new());
+    }
+    std::fs::create_dir_all(out_dir).map_err(|e| format!("创建图标字体输出目录失败: {}", e))?;
+    let exe = extract_embedded_exe()?;
+    let mut outputs = Vec::new();
+
+    for group in groups {
+        if group.sources.is_empty() {
+            continue;
+        }
+        let size = group.size.clamp(8, 256);
+        let bpp = group.bpp.unwrap_or(4).clamp(1, 4);
+        let output = out_dir.join(format!("designer_icons_{}.c", size));
+
+        let mut command = std::process::Command::new(&exe);
+        let mut has_source = false;
+        for source in &group.sources {
+            if source.codes.is_empty() {
+                continue;
+            }
+            let font_path = std::path::Path::new(&source.path);
+            if !font_path.is_file() {
+                return Err(format!("图标字体文件不存在: {}", source.path));
+            }
+            has_source = true;
+            command.arg("--font").arg(font_path);
+            for code in &source.codes {
+                command.arg("--range").arg(format!("0x{:X}", code));
+            }
+        }
+        if !has_source {
+            continue;
+        }
+        command
+            .arg("--size")
+            .arg(size.to_string())
+            .arg("--bpp")
+            .arg(bpp.to_string())
+            .arg("--output")
+            .arg(&output);
+
+        if let Some(app) = app {
+            designer_log(app, format!("合并生成图标字体: designer_icons_{}.c（{}px，{} 个字体来源）", size, size, group.sources.len()));
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+        }
+
+        let result = command
+            .output()
+            .map_err(|e| format!("无法启动 sgl_font_conv：{}", e))?;
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if let Some(app) = app {
+            for line in stdout.lines().chain(stderr.lines()) {
+                if !line.trim().is_empty() {
+                    designer_log(app, line.to_string());
+                }
+            }
+        }
+        if !result.status.success() {
+            let message = format!("生成图标字体失败（{}px）：{}", size, stderr.trim());
+            if let Some(app) = app {
+                designer_log(app, format!("[ERROR] {}", message));
+            }
+            return Err(message);
+        }
+        if !output.is_file() {
+            return Err(format!("图标字体生成后未找到输出文件: {}", output.display()));
+        }
+        outputs.push(output);
+    }
+
+    Ok(outputs)
+}
+
+/// 调用内嵌的 sgl_font_conv，只转换界面中实际出现的字符。
+fn designer_make_ui_fonts(
+    groups: &[DesignerUiFontGroup],
+    out_dir: &std::path::Path,
+    app: Option<&tauri::AppHandle>,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    if groups.is_empty() {
+        return Ok(Vec::new());
+    }
+    std::fs::create_dir_all(out_dir).map_err(|e| format!("创建字体输出目录失败: {}", e))?;
+    let exe = extract_embedded_exe()?;
+    let mut outputs = Vec::new();
+
+    for group in groups {
+        let symbol = group.symbol.trim();
+        let valid_symbol = !symbol.is_empty()
+            && symbol
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && symbol
+                .chars()
+                .next()
+                .map(|c| !c.is_ascii_digit())
+                .unwrap_or(false);
+        if !valid_symbol {
+            return Err(format!("字体符号不合法: {}", group.symbol));
+        }
+        let mut chars: Vec<u32> = group.chars.iter().copied().filter(|c| *c >= 0x20).collect();
+        chars.sort_unstable();
+        chars.dedup();
+        if chars.is_empty() {
+            continue;
+        }
+        let font_path = std::path::Path::new(&group.path);
+        if !font_path.is_file() {
+            return Err(format!("系统字体文件不存在: {}", group.path));
+        }
+        let size = group.size.clamp(8, 128);
+        let output = out_dir.join(format!("{}.c", symbol));
+
+        let mut command = std::process::Command::new(&exe);
+        command.arg("--font").arg(font_path);
+        for code in &chars {
+            command.arg("--range").arg(format!("0x{:X}", code));
+        }
+        command
+            .arg("--size")
+            .arg(size.to_string())
+            .arg("--bpp")
+            .arg("4")
+            .arg("--output")
+            .arg(&output);
+
+        if let Some(app) = app {
+            designer_log(
+                app,
+                format!("生成本地字体: {}.c（{}px，{} 个字符）", symbol, size, chars.len()),
+            );
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
+        let result = command
+            .output()
+            .map_err(|e| format!("无法启动 sgl_font_conv：{}", e))?;
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if let Some(app) = app {
+            for line in stdout.lines().chain(stderr.lines()) {
+                if !line.trim().is_empty() {
+                    designer_log(app, line.to_string());
+                }
+            }
+        }
+        if !result.status.success() {
+            let message = format!("生成本地字体失败（{}）：{}", symbol, stderr.trim());
+            if let Some(app) = app {
+                designer_log(app, format!("[ERROR] {}", message));
+            }
+            return Err(message);
+        }
+        if !output.is_file() {
+            return Err(format!("字体生成后未找到输出文件: {}", output.display()));
+        }
+        outputs.push(output);
+    }
+
+    Ok(outputs)
+}
+
+fn designer_build_and_run(
+    code: &str,
+    width: u16,
+    height: u16,
+    title: &str,
+    icon_groups: &[DesignerIconGroup],
+    ui_fonts: &[DesignerUiFontGroup],
+    app: &tauri::AppHandle,
+) -> Result<String, String> {
+    let root = designer_repo_root();
+    if !root.join("sgl_src").is_dir() || !root.join("sgl_port").is_dir() {
+        return Err(format!(
+            "未找到 SGL 源码目录（{}），无法编译仿真",
+            root.display()
+        ));
+    }
+
+    designer_kill_running();
+    designer_log(app, "========== 开始编译 SGL 仿真 ==========");
+    designer_log(app, format!("工程目录: {}", root.display()));
+
+    let work = std::env::temp_dir().join("sgltoolkit_designer");
+    let obj_dir = work.join("obj");
+    std::fs::create_dir_all(&obj_dir).map_err(|e| format!("创建仿真工作目录失败: {}", e))?;
+
+    let ui_source = work.join("designer_ui.c");
+    std::fs::write(&ui_source, code).map_err(|e| format!("写入设计器源码失败: {}", e))?;
+    designer_log(app, "已生成 designer_ui.c");
+
+    // 先按字号合并生成图标字体，再一起参与编译链接
+    let icon_font_sources = designer_make_icon_fonts(icon_groups, &work, Some(app))?;
+    let ui_font_sources = designer_make_ui_fonts(ui_fonts, &work, Some(app))?;
+
+    let includes = vec![
+        format!("-I{}", root.join("sgl_src").display()),
+        format!("-I{}", root.join("sgl_src").join("include").display()),
+        format!("-I{}", root.join("sgl_port").join("sdl").join("include").join("SDL2").display()),
+    ];
+
+    let mut safe_title: String = title
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { ' ' })
+        .collect();
+    if safe_title.trim().is_empty() {
+        safe_title = "SGL Designer".to_string();
+    }
+    let defines = vec![
+        format!("-DCONFIG_SGL_PANEL_WIDTH={}", width),
+        format!("-DCONFIG_SGL_PANEL_HEIGHT={}", height),
+        format!("-DCONFIG_SGL_WINDOW_TITLE=\"{}\"", safe_title.trim()),
+    ];
+
+    let sources = designer_collect_sources(&root);
+    let total = sources.len();
+    designer_log(app, format!("待处理 SGL 源文件: {} 个", total));
+
+    let mut objects: Vec<std::path::PathBuf> = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        let label = source.file_name().and_then(|n| n.to_str()).unwrap_or("source.c");
+        let object = obj_dir.join(designer_object_name(source, ""));
+        if designer_needs_rebuild(source, &object) {
+            designer_log(app, format!("[{}/{}] 编译 {}", index + 1, total, label));
+            designer_compile(source, &object, &includes, &[], app)?;
+        } else {
+            designer_log(app, format!("[{}/{}] 缓存 {}", index + 1, total, label));
+        }
+        objects.push(object);
+    }
+
+    // SDL 移植层 + 生成的 UI 每次都要重编（屏幕尺寸和界面内容会变化）
+    designer_log(app, "编译 SDL 移植层 sgl_port_sdl2.c");
+    let port_source = root.join("sgl_port").join("sgl_port_sdl2.c");
+    let port_object = obj_dir.join("designer_port.o");
+    designer_compile(&port_source, &port_object, &includes, &defines, app)?;
+    objects.push(port_object);
+
+    designer_log(app, "编译设计器界面 designer_ui.c");
+    let ui_object = obj_dir.join("designer_ui.o");
+    designer_compile(&ui_source, &ui_object, &includes, &[], app)?;
+    objects.push(ui_object);
+
+    for source in &icon_font_sources {
+        let stem = source
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("designer_icons");
+        designer_log(app, format!("编译图标字体 {}.c", stem));
+        let object = obj_dir.join(format!("{}.o", stem));
+        designer_compile(source, &object, &includes, &[], app)?;
+        objects.push(object);
+    }
+
+    for source in &ui_font_sources {
+        let stem = source
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("designer_ui_font");
+        designer_log(app, format!("编译本地字体 {}.c", stem));
+        let object = obj_dir.join(format!("{}.o", stem));
+        designer_compile(source, &object, &includes, &[], app)?;
+        objects.push(object);
+    }
+
+    let exe = work.join("sgl_designer_sim.exe");
+    let mut link_args: Vec<String> = objects
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    link_args.push("-o".into());
+    link_args.push(exe.to_string_lossy().into_owned());
+    link_args.push(format!("-L{}", root.join("sgl_port").join("sdl").join("lib").display()));
+    link_args.push("-lSDL2".into());
+    link_args.push("-lm".into());
+    link_args.push("-static-libgcc".into());
+    designer_log(app, "开始链接 sgl_designer_sim.exe");
+    designer_run_gcc(&link_args, app).map_err(|e| format!("链接失败:\n{}", e))?;
+    designer_log(app, "链接完成");
+
+    let sdl_dll = root.join("sgl_port").join("sdl").join("bin").join("SDL2.dll");
+    let dll_dest = work.join("SDL2.dll");
+    let need_copy = match (std::fs::metadata(&sdl_dll), std::fs::metadata(&dll_dest)) {
+        (Ok(a), Ok(b)) => a.len() != b.len(),
+        (Ok(_), Err(_)) => true,
+        _ => false,
+    };
+    if need_copy {
+        std::fs::copy(&sdl_dll, &dll_dest)
+            .map_err(|e| format!("复制 SDL2.dll 失败: {}", e))?;
+    }
+
+    let mut command = std::process::Command::new(&exe);
+    command.current_dir(&work);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let child = command
+        .spawn()
+        .map_err(|e| format!("启动仿真窗口失败: {}", e))?;
+    if let Ok(mut guard) = DESIGNER_SIM.lock() {
+        *guard = Some(child);
+    }
+    designer_log(app, "仿真窗口已启动（关闭窗口或按 Esc 退出）");
+
+    Ok("编译完成，仿真窗口已启动（关闭窗口或按 Esc 退出）".to_string())
+}
+
+#[tauri::command]
+async fn designer_run_simulation(
+    app: tauri::AppHandle,
+    code: String,
+    width: u16,
+    height: u16,
+    title: String,
+    icon_groups: Option<Vec<DesignerIconGroup>>,
+    ui_fonts: Option<Vec<DesignerUiFontGroup>>,
+) -> Result<String, String> {
+    let groups = icon_groups.unwrap_or_default();
+    let ui_fonts = ui_fonts.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = designer_build_and_run(&code, width, height, &title, &groups, &ui_fonts, &app);
+        match &result {
+            Ok(message) => designer_log(&app, message.clone()),
+            Err(err) => designer_log(&app, format!("[ERROR] {}", err)),
+        }
+        result
+    })
+    .await
+    .map_err(|e| format!("仿真任务执行失败: {}", e))?
+}
+
+/// 导出设计器时，把用到的图标按字号合并生成 C 字体文件到指定目录。
+#[tauri::command]
+async fn designer_generate_icon_fonts(
+    app: tauri::AppHandle,
+    groups: Vec<DesignerIconGroup>,
+    output_dir: String,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let outputs = designer_make_icon_fonts(&groups, std::path::Path::new(&output_dir), Some(&app))?;
+        Ok(outputs
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<String>>())
+    })
+    .await
+    .map_err(|e| format!("图标字体生成任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn designer_generate_ui_fonts(
+    app: tauri::AppHandle,
+    ui_fonts: Vec<DesignerUiFontGroup>,
+    output_dir: String,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let outputs = designer_make_ui_fonts(&ui_fonts, std::path::Path::new(&output_dir), Some(&app))?;
+        Ok(outputs
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<String>>())
+    })
+    .await
+    .map_err(|e| format!("本地字体生成任务失败: {}", e))?
+}
+
+#[tauri::command]
+fn designer_stop_simulation() -> Result<(), String> {
+    designer_kill_running();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -732,6 +1303,57 @@ mod tests {
             assert_eq!(extracted.as_slice(), expected_bytes);
             println!("内置图标字体: {} ({}) -> {}", font.name, font.file, font.path);
         }
+    }
+
+    #[test]
+    fn designer_icon_fonts_are_generated() {
+        let fonts = super::list_builtin_icon_fonts().unwrap();
+        let font = &fonts[0];
+        let out_dir = std::env::temp_dir().join("sgltoolkit_designer_icon_test");
+        let _ = std::fs::remove_dir_all(&out_dir);
+
+        let groups = vec![super::DesignerIconGroup {
+            size: 24,
+            bpp: Some(4),
+            sources: vec![super::DesignerIconSource {
+                path: font.path.clone(),
+                codes: vec![0x41],
+            }],
+        }];
+        let outputs = super::designer_make_icon_fonts(&groups, &out_dir, None).unwrap();
+        assert_eq!(outputs.len(), 1);
+        let text = std::fs::read_to_string(&outputs[0]).unwrap();
+        assert!(text.contains("const sgl_font_t designer_icons_24"));
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
+    fn designer_ui_fonts_are_generated_for_used_chars() {
+        if !cfg!(windows) {
+            return;
+        }
+        let fonts = super::collect_system_fonts();
+        let font = match fonts
+            .into_iter()
+            .find(|f| f.path.to_ascii_lowercase().ends_with(".ttf"))
+        {
+            Some(font) => font,
+            None => return,
+        };
+        let out_dir = std::env::temp_dir().join("sgltoolkit_ui_font_test");
+        let _ = std::fs::remove_dir_all(&out_dir);
+        let groups = vec![super::DesignerUiFontGroup {
+            symbol: "sysfont_test".to_string(),
+            path: font.path,
+            size: 24,
+            chars: vec![0x41, 0x42],
+        }];
+        let outputs = super::designer_make_ui_fonts(&groups, &out_dir, None).unwrap();
+        assert_eq!(outputs.len(), 1);
+        let text = std::fs::read_to_string(&outputs[0]).unwrap();
+        assert!(text.contains("const sgl_font_t sysfont_test"));
+        assert!(text.contains(".offset = 0x41, .len = 2"));
+        let _ = std::fs::remove_dir_all(&out_dir);
     }
 
     #[test]
@@ -754,7 +1376,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, run_shell_command, get_file_size, list_system_fonts, list_builtin_icon_fonts, move_file, remove_file, run_ffmpeg_with_progress, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files])
+        .invoke_handler(tauri::generate_handler![greet, run_shell_command, get_file_size, list_system_fonts, list_builtin_icon_fonts, move_file, remove_file, run_ffmpeg_with_progress, read_file_as_base64, save_file, write_file, write_bin_file, write_file_chunk, write_bin_file_chunk, zip_files, designer_run_simulation, designer_generate_icon_fonts, designer_generate_ui_fonts, designer_stop_simulation])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
